@@ -1110,43 +1110,108 @@ async function deleteMenu(id) {
   toast('Menu dihapus.');
 }
 
-/* ===== Foto URL modal ===== */
+/* ===== Foto Upload modal (Supabase Storage) ===== */
+
+// Compress image di client sebelum upload — biar gak buang-buang storage.
+// 3-5 MB foto HP → ~100-300 KB JPEG 800px.
+async function compressImage(file, maxDim = 800, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = reject;
+    img.onerror = reject;
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('Compress gagal')), 'image/jpeg', quality);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadMenuFoto(file, menuId) {
+  const blob = await compressImage(file);
+  const sizeKb = Math.round(blob.size / 1024);
+  // Filename unik tiap upload — supaya browser gak cache versi lama
+  const filename = `menu-${menuId}-${Date.now()}.jpg`;
+  const { error } = await supa.storage
+    .from('menu-photos')
+    .upload(filename, blob, { contentType: 'image/jpeg', upsert: true });
+  if (error) throw error;
+  const { data } = supa.storage.from('menu-photos').getPublicUrl(filename);
+  return { url: data.publicUrl, sizeKb };
+}
+
 function openFotoModal(menuId) {
   const menu = stateMenu.find(m => m.id == menuId);
   if (!menu) return;
+
   const overlay = document.createElement('div');
   overlay.className = 'foto-modal-overlay';
   overlay.innerHTML = `
     <div class="foto-modal">
       <h3>Foto Menu: ${menu.nama}</h3>
-      <div class="preview-area" id="fotoPreview">
-        ${menu.foto_url ? `<img src="${menu.foto_url}" alt="" />` : 'Preview foto'}
-      </div>
-      <div class="form-group">
-        <label>URL Foto</label>
-        <input type="text" id="fotoUrlInput" value="${menu.foto_url || ''}"
-               placeholder="https://i.imgbb.com/abc/sate-ayam.jpg" autocomplete="off" />
-        <p class="text-muted" style="font-size: 0.78rem; margin-top: 6px;">
-          Tip: upload foto ke <a href="https://imgbb.com" target="_blank" style="color: var(--ember);">imgbb.com</a>
-          (gratis, no signup) → copy "Direct Link" → paste di sini.
-        </p>
-      </div>
-      <div style="display: flex; gap: 8px; justify-content: flex-end;">
-        <button class="btn btn-ghost btn-sm" id="fotoCancel">Batal</button>
-        <button class="btn btn-ghost btn-sm" id="fotoClear" style="color: var(--red);">Hapus Foto</button>
-        <button class="btn btn-primary btn-sm" id="fotoSave">Simpan</button>
+      <label for="fotoFileInput" class="preview-area" id="fotoPreview" style="cursor: pointer;">
+        ${menu.foto_url
+          ? `<img src="${menu.foto_url}" alt="" />`
+          : '<div style="text-align: center; padding: 24px;"><div style="font-size: 2.4rem;">📷</div><div style="margin-top: 6px;">Klik untuk pilih foto</div><div style="font-size: 0.75rem; margin-top: 4px;">JPG / PNG / WebP · max 10 MB</div></div>'
+        }
+      </label>
+      <input type="file" id="fotoFileInput" accept="image/*" style="display: none;" />
+      <p class="text-muted" id="fotoStatus" style="font-size: 0.82rem; margin-top: 8px; min-height: 20px;"></p>
+      <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;">
+        <button class="btn btn-ghost btn-sm" id="fotoCancel">Tutup</button>
+        ${menu.foto_url ? '<button class="btn btn-ghost btn-sm" id="fotoClear" style="color: var(--red);">🗑 Hapus Foto</button>' : ''}
       </div>
     </div>`;
   document.body.appendChild(overlay);
 
-  const inp = $('#fotoUrlInput');
-  inp.addEventListener('input', () => {
-    const url = inp.value.trim();
-    $('#fotoPreview').innerHTML = url ? `<img src="${url}" alt="" onerror="this.parentNode.innerHTML='⚠ URL tidak valid / gambar gagal load'" />` : 'Preview foto';
+  const fileInput = $('#fotoFileInput');
+  const status = $('#fotoStatus');
+  const preview = $('#fotoPreview');
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      status.textContent = '⚠ Bukan file gambar.'; return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      status.textContent = '⚠ Ukuran > 10 MB. Coba foto yang lebih kecil.'; return;
+    }
+    status.textContent = '⏳ Compressing & upload…';
+    try {
+      const { url, sizeKb } = await uploadMenuFoto(file, menuId);
+      // Save URL ke menu table
+      const { error } = await supa.from('menu').update({ foto_url: url }).eq('id', menuId);
+      if (error) throw error;
+      const m = stateMenu.find(x => x.id == menuId);
+      if (m) m.foto_url = url;
+      preview.innerHTML = `<img src="${url}" alt="" />`;
+      status.textContent = `✓ Foto tersimpan (${sizeKb} KB)`;
+      renderMenuTable();
+      toast('Foto menu di-update.', 'success');
+    } catch (err) {
+      status.textContent = '⚠ Upload gagal: ' + err.message;
+      console.error(err);
+    }
   });
+
   $('#fotoCancel').onclick = () => overlay.remove();
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-  $('#fotoClear').onclick = async () => {
+  $('#fotoClear')?.addEventListener('click', async () => {
     if (!confirm('Hapus foto menu ini?')) return;
     await supa.from('menu').update({ foto_url: null }).eq('id', menuId);
     const m = stateMenu.find(x => x.id == menuId);
@@ -1154,18 +1219,7 @@ function openFotoModal(menuId) {
     overlay.remove();
     renderMenuTable();
     toast('Foto dihapus.');
-  };
-  $('#fotoSave').onclick = async () => {
-    const url = inp.value.trim() || null;
-    const { error } = await supa.from('menu').update({ foto_url: url }).eq('id', menuId);
-    if (error) { toast('Gagal: ' + error.message, 'error'); return; }
-    const m = stateMenu.find(x => x.id == menuId);
-    if (m) m.foto_url = url;
-    overlay.remove();
-    renderMenuTable();
-    toast('Foto tersimpan. Refresh Kasir untuk lihat update.', 'success');
-  };
-  setTimeout(() => inp.focus(), 50);
+  });
 }
 
 function renderResepPicker() {

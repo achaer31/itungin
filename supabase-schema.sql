@@ -298,7 +298,30 @@ CREATE POLICY "anon_all_pesanan_item" ON public.pesanan_item FOR ALL TO anon USI
 CREATE POLICY "anon_all_pembayaran"   ON public.pembayaran   FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ================================================================
+-- STORAGE BUCKET: menu-photos (untuk upload foto menu langsung dari app)
+-- ================================================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('menu-photos', 'menu-photos', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Policies — allow anon (frontend) untuk upload/read/delete
+DROP POLICY IF EXISTS "anon_upload_menu_photos"  ON storage.objects;
+DROP POLICY IF EXISTS "anon_read_menu_photos"    ON storage.objects;
+DROP POLICY IF EXISTS "anon_update_menu_photos"  ON storage.objects;
+DROP POLICY IF EXISTS "anon_delete_menu_photos"  ON storage.objects;
+
+CREATE POLICY "anon_upload_menu_photos" ON storage.objects FOR INSERT TO anon
+  WITH CHECK (bucket_id = 'menu-photos');
+CREATE POLICY "anon_read_menu_photos"   ON storage.objects FOR SELECT TO anon
+  USING (bucket_id = 'menu-photos');
+CREATE POLICY "anon_update_menu_photos" ON storage.objects FOR UPDATE TO anon
+  USING (bucket_id = 'menu-photos');
+CREATE POLICY "anon_delete_menu_photos" ON storage.objects FOR DELETE TO anon
+  USING (bucket_id = 'menu-photos');
+
+-- ================================================================
 -- Done. Cek di Table Editor → harus muncul 9 tabel:
 -- outlet, transaksi, pengaturan, bahan, menu, resep, pesanan,
 -- pesanan_item, pembayaran
+-- Cek Storage → bucket "menu-photos" (public) sudah ada.
 -- ================================================================
