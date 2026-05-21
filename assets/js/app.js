@@ -894,9 +894,11 @@ function showHppTab(tab) {
   hppTab = tab;
   $$('#hppTabs button').forEach(b => b.classList.toggle('active', b.dataset.hppTab === tab));
   $('#hppHitung').style.display = tab === 'hitung' ? '' : 'none';
+  $('#hppMenu').style.display   = tab === 'menu'   ? '' : 'none';
   $('#hppBahan').style.display  = tab === 'bahan'  ? '' : 'none';
   $('#hppResep').style.display  = tab === 'resep'  ? '' : 'none';
   if (tab === 'hitung') renderHppTable();
+  if (tab === 'menu')   renderMenuTable();
   if (tab === 'bahan')  renderBahanTable();
   if (tab === 'resep')  renderResepPicker();
 }
@@ -1014,6 +1016,156 @@ async function deleteBahan(id) {
   await fetchResep();
   renderBahanTable();
   toast('Bahan dihapus.');
+}
+
+/* ===== MENU CRUD ===== */
+let menuSearchTerm = '';
+
+function renderMenuTable() {
+  const tbody = $('#menuTable tbody');
+  const filter = (menuSearchTerm || '').toLowerCase();
+  const filtered = stateMenu.filter(m =>
+    !filter || m.nama.toLowerCase().includes(filter) || (m.kategori || '').toLowerCase().includes(filter)
+  );
+  if (stateMenu.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Belum ada menu. Klik "+ Tambah Menu".</td></tr>`;
+    return;
+  }
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Tidak ada menu cocok dengan "${filter}".</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(m => {
+    const fotoHtml = m.foto_url
+      ? `<img src="${m.foto_url}" alt="" />`
+      : (KATEGORI_EMOJI[m.kategori] || '🍽');
+    return `
+    <tr class="menu-row ${m.aktif === false ? 'inactive' : ''}" data-id="${m.id}">
+      <td><div class="foto-cell" data-edit-foto="${m.id}">${fotoHtml}</div></td>
+      <td><input type="text" class="menu-nama" value="${m.nama}" placeholder="Nama menu" /></td>
+      <td>
+        <select class="menu-kategori">
+          ${['Sate','Sop','Minuman','Pelengkap','Paket','Promo'].map(k =>
+            `<option ${k === m.kategori ? 'selected' : ''}>${k}</option>`).join('')}
+        </select>
+      </td>
+      <td class="harga"><input type="text" class="menu-harga number-input" inputmode="numeric" value="${fmtNumber(m.harga_jual)}" autocomplete="off" /></td>
+      <td><input type="number" class="menu-urutan" inputmode="numeric" min="0" value="${m.urutan || 0}" style="width: 64px; text-align: center;" /></td>
+      <td><input type="checkbox" class="toggle-aktif" ${m.aktif !== false ? 'checked' : ''} title="Tampilkan di Kasir" /></td>
+      <td><button class="row-delete" data-del-menu="${m.id}" title="Hapus menu">🗑</button></td>
+    </tr>`;
+  }).join('');
+
+  // Wire up
+  $$('.menu-row', tbody).forEach(row => {
+    const id = row.dataset.id;
+    $$('input, select', row).forEach(inp => {
+      inp.addEventListener('blur',  () => saveMenuRow(id, row));
+      inp.addEventListener('change', () => saveMenuRow(id, row));
+    });
+    row.querySelector('[data-edit-foto]')?.addEventListener('click', () => openFotoModal(id));
+    row.querySelector('[data-del-menu]')?.addEventListener('click', () => deleteMenu(id));
+  });
+}
+
+async function addMenu() {
+  const maxUrutan = stateMenu.reduce((m, x) => Math.max(m, x.urutan || 0), 0);
+  const { data, error } = await supa.from('menu').insert({
+    nama: 'Menu Baru ' + (stateMenu.length + 1),
+    kategori: 'Sate',
+    harga_jual: 0,
+    urutan: maxUrutan + 1,
+    aktif: true
+  }).select().single();
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  stateMenu.push(data);
+  renderMenuTable();
+  toast('Menu ditambah. Edit nama, kategori & harga di tabel.', 'success');
+}
+
+async function saveMenuRow(id, row) {
+  const payload = {
+    nama: $('.menu-nama', row).value.trim(),
+    kategori: $('.menu-kategori', row).value,
+    harga_jual: parseNum($('.menu-harga', row).value),
+    urutan: parseInt($('.menu-urutan', row).value) || 0,
+    aktif: $('.toggle-aktif', row).checked
+  };
+  const { error } = await supa.from('menu').update(payload).eq('id', id);
+  if (error) { toast('Gagal update: ' + error.message, 'error'); return; }
+  const idx = stateMenu.findIndex(m => m.id == id);
+  if (idx >= 0) stateMenu[idx] = { ...stateMenu[idx], ...payload };
+  row.classList.toggle('inactive', payload.aktif === false);
+}
+
+async function deleteMenu(id) {
+  const menu = stateMenu.find(m => m.id == id);
+  if (!menu) return;
+  if (!confirm(`Hapus menu "${menu.nama}"?\n\nKalau menu ini pernah dipesan, riwayat di POS tetap aman (snapshot harga). Tapi resep menu ini akan ikut hilang.`)) return;
+  const { error } = await supa.from('menu').delete().eq('id', id);
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  stateMenu = stateMenu.filter(m => m.id != id);
+  await fetchResep();
+  renderMenuTable();
+  toast('Menu dihapus.');
+}
+
+/* ===== Foto URL modal ===== */
+function openFotoModal(menuId) {
+  const menu = stateMenu.find(m => m.id == menuId);
+  if (!menu) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'foto-modal-overlay';
+  overlay.innerHTML = `
+    <div class="foto-modal">
+      <h3>Foto Menu: ${menu.nama}</h3>
+      <div class="preview-area" id="fotoPreview">
+        ${menu.foto_url ? `<img src="${menu.foto_url}" alt="" />` : 'Preview foto'}
+      </div>
+      <div class="form-group">
+        <label>URL Foto</label>
+        <input type="text" id="fotoUrlInput" value="${menu.foto_url || ''}"
+               placeholder="https://i.imgbb.com/abc/sate-ayam.jpg" autocomplete="off" />
+        <p class="text-muted" style="font-size: 0.78rem; margin-top: 6px;">
+          Tip: upload foto ke <a href="https://imgbb.com" target="_blank" style="color: var(--ember);">imgbb.com</a>
+          (gratis, no signup) → copy "Direct Link" → paste di sini.
+        </p>
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-ghost btn-sm" id="fotoCancel">Batal</button>
+        <button class="btn btn-ghost btn-sm" id="fotoClear" style="color: var(--red);">Hapus Foto</button>
+        <button class="btn btn-primary btn-sm" id="fotoSave">Simpan</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const inp = $('#fotoUrlInput');
+  inp.addEventListener('input', () => {
+    const url = inp.value.trim();
+    $('#fotoPreview').innerHTML = url ? `<img src="${url}" alt="" onerror="this.parentNode.innerHTML='⚠ URL tidak valid / gambar gagal load'" />` : 'Preview foto';
+  });
+  $('#fotoCancel').onclick = () => overlay.remove();
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  $('#fotoClear').onclick = async () => {
+    if (!confirm('Hapus foto menu ini?')) return;
+    await supa.from('menu').update({ foto_url: null }).eq('id', menuId);
+    const m = stateMenu.find(x => x.id == menuId);
+    if (m) m.foto_url = null;
+    overlay.remove();
+    renderMenuTable();
+    toast('Foto dihapus.');
+  };
+  $('#fotoSave').onclick = async () => {
+    const url = inp.value.trim() || null;
+    const { error } = await supa.from('menu').update({ foto_url: url }).eq('id', menuId);
+    if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+    const m = stateMenu.find(x => x.id == menuId);
+    if (m) m.foto_url = url;
+    overlay.remove();
+    renderMenuTable();
+    toast('Foto tersimpan. Refresh Kasir untuk lihat update.', 'success');
+  };
+  setTimeout(() => inp.focus(), 50);
 }
 
 function renderResepPicker() {
@@ -1157,7 +1309,9 @@ async function loadKasir() {
 
 function renderPosKategoriTabs() {
   const tabsEl = $('#posKategoriTabs');
-  const kategoris = [...new Set(stateMenu.map(m => m.kategori))];
+  // Hanya menu aktif yang ditampilkan di Kasir
+  const aktifMenus = stateMenu.filter(m => m.aktif !== false);
+  const kategoris = [...new Set(aktifMenus.map(m => m.kategori))];
   tabsEl.innerHTML = `<button class="pos-kategori-tab ${posKategoriFilter === '' ? 'active' : ''}" data-kategori="">Semua</button>` +
     kategoris.map(k => {
       const emoji = KATEGORI_EMOJI[k] || '🍽';
@@ -1172,9 +1326,11 @@ function renderPosKategoriTabs() {
 
 function renderPosMenuGrid() {
   const el = $('#posMenuGrid');
+  // Hanya menu aktif yang muncul di Kasir
+  const aktifMenus = stateMenu.filter(m => m.aktif !== false);
   const filtered = posKategoriFilter
-    ? stateMenu.filter(m => m.kategori === posKategoriFilter)
-    : stateMenu;
+    ? aktifMenus.filter(m => m.kategori === posKategoriFilter)
+    : aktifMenus;
 
   if (filtered.length === 0) {
     el.innerHTML = '<div class="empty-state">Belum ada menu di kategori ini.</div>';
@@ -1657,6 +1813,11 @@ function bindEvents() {
   // HPP tabs
   $$('#hppTabs button').forEach(b => b.addEventListener('click', () => showHppTab(b.dataset.hppTab)));
   $('#addBahanBtn').addEventListener('click', addBahan);
+  $('#addMenuBtn')?.addEventListener('click', addMenu);
+  $('#menuSearch')?.addEventListener('input', (e) => {
+    menuSearchTerm = e.target.value;
+    renderMenuTable();
+  });
 
   // Router
   window.addEventListener('hashchange', handleRoute);

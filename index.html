@@ -344,6 +344,7 @@
         <div class="view-toolbar">
           <div class="mode-toggle" id="hppTabs">
             <button class="active" data-hpp-tab="hitung">📊 Profit Menu</button>
+            <button data-hpp-tab="menu">📋 Menu</button>
             <button data-hpp-tab="bahan">🥩 Bahan Baku</button>
             <button data-hpp-tab="resep">📝 Resep Menu</button>
           </div>
@@ -358,6 +359,36 @@
           <div class="grid-wrap">
             <table class="hpp-table" id="hppTable">
               <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB: Manage Menu -->
+        <div id="hppMenu" class="hpp-tab-content" style="display: none;">
+          <div class="view-toolbar">
+            <strong style="font-size: 0.95rem;">Master Menu</strong>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <input type="text" id="menuSearch" placeholder="🔍 Cari menu…" style="padding: 8px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; min-width: 180px;" />
+              <button class="btn btn-ghost btn-sm" id="addMenuBtn">+ Tambah Menu</button>
+            </div>
+          </div>
+          <div class="bulk-help">
+            💡 <strong>Foto:</strong> paste URL gambar (bisa dari Instagram, Google Drive public, atau upload ke <a href="https://imgbb.com" target="_blank" style="color: var(--ember);">imgbb.com</a>). Untuk paket promo musiman, set <strong>Aktif = off</strong> setelah promo selesai — riwayat pesanan lama tetap aman.
+          </div>
+          <div class="grid-wrap">
+            <table class="bulk-grid" id="menuTable">
+              <thead>
+                <tr>
+                  <th style="width: 70px;">Foto</th>
+                  <th style="text-align:left; padding-left: 16px;">Nama</th>
+                  <th>Kategori</th>
+                  <th>Harga Jual</th>
+                  <th>Urutan</th>
+                  <th>Aktif</th>
+                  <th></th>
+                </tr>
+              </thead>
               <tbody></tbody>
             </table>
           </div>
