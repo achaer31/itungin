@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#16100c" />
+  <meta name="robots" content="noindex, nofollow" />
+
+  <title>Itungin — Pencatat Sate Javva</title>
+  <meta name="description" content="Aplikasi internal Sate Javva untuk catat pemasukan & pengeluaran harian." />
+
+  <link rel="icon" type="image/png" href="/assets/images/logo.png" />
+  <link rel="apple-touch-icon" href="/assets/images/logo.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+
+  <!-- Supabase JS SDK (UMD) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+
+<body class="unauthenticated">
+
+  <!-- ====================================================
+       APP HEADER (hidden when not logged in)
+       ==================================================== -->
+  <header id="app-header">
+    <nav class="nav" aria-label="Navigasi">
+      <div class="brand">
+        <span class="brand-mark"><img src="/assets/images/logo.png" alt="" /></span>
+        <span>ITUNGIN</span>
+      </div>
+
+      <ul class="nav-tabs" id="navTabs">
+        <li><a href="#/dashboard" data-view="dashboard">Dashboard</a></li>
+        <li><a href="#/kasir" data-view="kasir" data-role="admin,kasir">🛒 Kasir</a></li>
+        <li><a href="#/input" data-view="input" data-role="admin">Input</a></li>
+        <li><a href="#/rekap" data-view="rekap">Rekap</a></li>
+        <li><a href="#/hpp" data-view="hpp" data-role="admin">HPP & Profit</a></li>
+        <li><a href="#/pengaturan" data-view="pengaturan" data-role="admin">Pengaturan</a></li>
+      </ul>
+
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span class="user-chip">
+          <strong id="navUserName">—</strong>
+          <span class="role" id="navUserRole">—</span>
+        </span>
+        <button class="logout-btn" id="logoutBtn">Logout</button>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- ====================================================
+         LOGIN VIEW
+         ==================================================== -->
+    <section id="view-login" class="view">
+      <div class="login-card">
+        <div class="brand-mark" style="width:56px; height:56px; margin: 0 auto 16px;">
+          <img src="/assets/images/logo.png" alt="Sate Javva" />
+        </div>
+        <h1>Itungin</h1>
+        <p class="subtitle">Pencatat pemasukan & pengeluaran Sate Javva</p>
+
+        <div class="login-error" id="loginError">Username atau password salah.</div>
+
+        <div class="form-group">
+          <label for="loginUsername">Username</label>
+          <input type="text" id="loginUsername" autocomplete="username" placeholder="gayuh / yoan / abdu / anton" />
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <button class="btn btn-primary btn-block" id="loginBtn">Masuk</button>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         DASHBOARD
+         ==================================================== -->
+    <section id="view-dashboard" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1>Dashboard <span class="accent">hari ini</span>.</h1>
+          <div class="actions">
+            <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Refresh</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card highlight">
+            <div class="kpi-label">Laba Bersih Hari Ini</div>
+            <div class="kpi-value" id="kpiLabaHariIni">Rp 0</div>
+            <div class="kpi-sub" id="kpiLabaHariIniSub">—</div>
+          </div>
+          <div class="kpi-card highlight">
+            <div class="kpi-label">Laba Bersih Bulan Ini</div>
+            <div class="kpi-value" id="kpiLabaBulan">Rp 0</div>
+            <div class="kpi-sub" id="kpiLabaBulanSub">—</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Margin Bulan Ini</div>
+            <div class="kpi-value" id="kpiMargin">0%</div>
+            <div class="kpi-sub">Laba ÷ Pemasukan</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Status Hari Ini</div>
+            <div class="kpi-value" style="font-size: 1.2rem; margin-top: 4px;" id="kpiBreakeven">—</div>
+            <div class="kpi-sub" id="kpiBreakevenSub">—</div>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card progress-card">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span class="kpi-label">Progress Target Bulanan</span>
+              <span class="kpi-value" id="kpiProgressPct" style="font-size: 1.4rem;">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-bar-fill" id="progressFill" style="width: 0%;"></div>
+            </div>
+            <div class="kpi-sub" id="kpiProgressSub">Rp 0 / Rp 0</div>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>Pemasukan Harian (bulan ini)</h3>
+            <div class="chart-wrap"><canvas id="chartDaily"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Uang Lari ke Mana? (pengeluaran)</h3>
+            <div class="chart-wrap"><canvas id="chartExpense"></canvas></div>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>Breakdown Pemasukan per Channel (bulan ini)</h3>
+            <ul class="channel-list" id="channelList">
+              <li class="empty-state">Belum ada data.</li>
+            </ul>
+          </div>
+          <div class="chart-card">
+            <h3>🔥 Menu Paling Untung (HPP)</h3>
+            <ul class="channel-list" id="topMenuProfit">
+              <li class="empty-state">Belum ada resep HPP.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>📊 Item Terjual Hari Ini (POS)</h3>
+            <ul class="channel-list" id="todayItemsList">
+              <li class="empty-state">Belum ada pesanan kasir hari ini.</li>
+            </ul>
+          </div>
+          <div class="chart-card">
+            <h3>⭐ Menu Terlaris (bulan ini)</h3>
+            <ul class="channel-list" id="topSellingList">
+              <li class="empty-state">Belum ada data POS.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         INPUT (admin only)
+         ==================================================== -->
+    <section id="view-input" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1>Input <span class="accent">data</span>.</h1>
+        </div>
+
+        <div class="view-toolbar">
+          <div class="mode-toggle" id="modeToggle">
+            <button class="active" data-mode="A">Mode A · Per Hari</button>
+            <button data-mode="B">Mode B · Bulk Grid</button>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <input type="date" id="inputDate" style="padding: 10px 12px; min-width: 170px;" />
+          </div>
+        </div>
+
+        <!-- MODE A -->
+        <div id="modeA">
+          <div class="input-sections">
+            <div class="input-section pemasukan">
+              <h3>💰 Pemasukan Hari Ini</h3>
+              <div id="pemasukanInputs"></div>
+            </div>
+            <div class="input-section pengeluaran">
+              <h3>💸 Pengeluaran Hari Ini</h3>
+              <div id="pengeluaranInputs"></div>
+            </div>
+          </div>
+
+          <div class="input-totals">
+            <div class="input-total-box">
+              <div class="label">Total Pemasukan</div>
+              <div class="value" id="totalPemasukan" style="color: var(--green);">Rp 0</div>
+            </div>
+            <div class="input-total-box">
+              <div class="label">Total Pengeluaran</div>
+              <div class="value" id="totalPengeluaran" style="color: var(--amber);">Rp 0</div>
+            </div>
+            <div class="input-total-box laba">
+              <div class="label">Laba Bersih</div>
+              <div class="value" id="totalLaba">Rp 0</div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <button class="btn btn-primary" id="saveModeABtn">💾 Simpan Data Hari Ini</button>
+            <button class="btn btn-ghost" id="clearModeABtn">Reset Form</button>
+          </div>
+
+          <div class="recent-entries mt-16">
+            <h3>Entri Hari Ini</h3>
+            <div id="todayEntries">
+              <div class="empty-state">Belum ada entri untuk tanggal ini.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODE B -->
+        <div id="modeB" style="display: none;">
+          <div class="bulk-help">
+            💡 <strong>Tip:</strong> klik sel & ketik angka, pindah dengan Tab/Enter. Bisa <strong>paste dari Excel/Sheets</strong> (copy blok lalu Ctrl+V di sel pertama). Klik <strong>+ Tambah Baris</strong> untuk hari baru.
+          </div>
+
+          <div class="grid-wrap">
+            <table class="bulk-grid" id="bulkGrid">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <button class="btn btn-ghost btn-sm" id="addRowBtn">+ Tambah Baris</button>
+            <button class="btn btn-primary" id="saveBulkBtn">💾 Simpan Semua</button>
+            <span class="text-muted" id="bulkStatus" style="font-size: 0.85rem;"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         REKAP
+         ==================================================== -->
+    <section id="view-rekap" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1>Rekap <span class="accent">bulanan</span>.</h1>
+          <div class="actions">
+            <input type="month" id="rekapMonth" style="padding: 10px 14px; background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: 10px;" />
+            <button class="btn btn-ghost btn-sm" id="exportCsvBtn">⬇ Export CSV</button>
+          </div>
+        </div>
+
+        <div id="rekapContent">
+          <div class="loading">Memuat data…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         PENGATURAN (admin only)
+         ==================================================== -->
+    <section id="view-pengaturan" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1><span class="accent">Pengaturan</span>.</h1>
+        </div>
+
+        <div class="settings-card">
+          <div class="form-group">
+            <label for="settingTarget">Target Laba Bulanan (Rp)</label>
+            <input type="number" id="settingTarget" inputmode="numeric" min="0" placeholder="10000000" />
+            <p class="text-muted" style="font-size: 0.82rem; margin-top: 6px;">
+              Target laba bersih per bulan. Dipakai untuk progress bar di Dashboard.
+            </p>
+          </div>
+
+          <h3 style="font-family: var(--font-body); font-size: 0.82rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cream-dim); margin-top: 24px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line);">
+            Komisi Platform (%)
+          </h3>
+          <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 16px;">
+            Persentase komisi yang dipotong app dari harga jual. Dipakai untuk hitung profit asli di HPP & Profit.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label for="komisiGofood">GoFood (%)</label>
+              <input type="number" id="komisiGofood" inputmode="decimal" min="0" max="100" step="0.5" placeholder="20" />
+            </div>
+            <div class="form-group">
+              <label for="komisiGrab">GrabFood (%)</label>
+              <input type="number" id="komisiGrab" inputmode="decimal" min="0" max="100" step="0.5" placeholder="20" />
+            </div>
+            <div class="form-group">
+              <label for="komisiShopee">ShopeeFood (%)</label>
+              <input type="number" id="komisiShopee" inputmode="decimal" min="0" max="100" step="0.5" placeholder="20" />
+            </div>
+            <div class="form-group">
+              <label for="komisiWa">WA / Langsung (%)</label>
+              <input type="number" id="komisiWa" inputmode="decimal" min="0" max="100" step="0.5" placeholder="0" />
+            </div>
+          </div>
+
+          <button class="btn btn-primary" id="saveSettingsBtn">💾 Simpan Pengaturan</button>
+        </div>
+
+        <div class="settings-card mt-16">
+          <h3 style="font-family: var(--font-body); font-size: 0.82rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cream-dim); margin-bottom: 12px;">Tentang App</h3>
+          <p class="text-muted" style="font-size: 0.9rem; line-height: 1.7;">
+            Itungin v1.0 · Pencatat sederhana untuk Sate Javva.<br/>
+            Data tersinkron via Supabase. Untuk tambah user / ubah role / ubah password, edit
+            <code style="background: var(--bg-1); padding: 2px 6px; border-radius: 4px; color: var(--ember);">assets/js/config.js</code>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         HPP & PROFIT (admin only)
+         ==================================================== -->
+    <section id="view-hpp" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1>HPP & <span class="accent">Profit per Menu</span>.</h1>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="view-toolbar">
+          <div class="mode-toggle" id="hppTabs">
+            <button class="active" data-hpp-tab="hitung">📊 Profit Menu</button>
+            <button data-hpp-tab="bahan">🥩 Bahan Baku</button>
+            <button data-hpp-tab="resep">📝 Resep Menu</button>
+          </div>
+        </div>
+
+        <!-- TAB: Hitung Profit -->
+        <div id="hppHitung" class="hpp-tab-content">
+          <div class="bulk-help">
+            💡 Tabel di bawah otomatis menghitung HPP menu dari resep + harga bahan, lalu profit di tiap channel setelah dipotong komisi.
+            Edit harga bahan di tab <strong>Bahan Baku</strong>, edit resep di tab <strong>Resep Menu</strong>.
+          </div>
+          <div class="grid-wrap">
+            <table class="hpp-table" id="hppTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB: Master Bahan -->
+        <div id="hppBahan" class="hpp-tab-content" style="display: none;">
+          <div class="view-toolbar">
+            <strong style="font-size: 0.95rem;">Master Bahan Baku</strong>
+            <button class="btn btn-ghost btn-sm" id="addBahanBtn">+ Tambah Bahan</button>
+          </div>
+          <div class="grid-wrap">
+            <table class="bulk-grid" id="bahanTable">
+              <thead>
+                <tr>
+                  <th style="text-align:left; padding-left: 16px;">Nama</th>
+                  <th>Satuan</th>
+                  <th>Harga per Satuan (Rp)</th>
+                  <th>Catatan</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB: Resep Menu -->
+        <div id="hppResep" class="hpp-tab-content" style="display: none;">
+          <div class="view-toolbar">
+            <strong style="font-size: 0.95rem;">Resep per Menu</strong>
+            <select id="resepMenuPicker" style="padding: 8px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; color: var(--cream); min-width: 220px;">
+              <option value="">— Pilih Menu —</option>
+            </select>
+          </div>
+          <div id="resepEditor">
+            <div class="empty-state">Pilih menu di atas untuk edit resep.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         KASIR / POS (admin + kasir)
+         ==================================================== -->
+    <section id="view-kasir" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1>🛒 Kasir <span class="accent">Sate Javva</span></h1>
+          <div class="actions">
+            <span class="text-muted" id="kasirTodaySummary" style="font-size: 0.9rem;">—</span>
+          </div>
+        </div>
+
+        <div class="pos-layout">
+          <!-- Menu grid -->
+          <div class="pos-menu-section">
+            <div class="pos-kategori-tabs" id="posKategoriTabs">
+              <button class="pos-kategori-tab active" data-kategori="">Semua</button>
+            </div>
+            <div id="posMenuGrid" class="pos-menu-grid">
+              <div class="loading">Memuat menu…</div>
+            </div>
+          </div>
+
+          <!-- Cart -->
+          <aside class="pos-cart">
+            <h3 class="pos-cart-title">🧾 Pesanan</h3>
+
+            <div class="pos-cart-meta">
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label>Channel</label>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  <button class="pos-channel-pill active" data-channel="Dine-in">Dine-in</button>
+                  <button class="pos-channel-pill" data-channel="Take-away">Take-away</button>
+                  <button class="pos-channel-pill" data-channel="WA">WA</button>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label>Nama / Meja (opsional)</label>
+                <input type="text" id="posMejaNama" placeholder="Meja 3 / Pak Budi" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;" />
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>Metode Bayar</label>
+                <div style="display: flex; gap: 6px;">
+                  <button class="pos-channel-pill active" data-bayar="Tunai">💵 Tunai</button>
+                  <button class="pos-channel-pill" data-bayar="QRIS">📱 QRIS</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="pos-cart-items" id="posCartItems">
+              <div class="empty-state" style="padding: 20px;">Klik menu di kiri untuk mulai.</div>
+            </div>
+
+            <div class="pos-cart-total">
+              <div class="pos-total-row">
+                <span>Total</span>
+                <strong id="posTotal">Rp 0</strong>
+              </div>
+            </div>
+
+            <div style="display: grid; gap: 8px;">
+              <button class="btn btn-ghost" id="posSendKitchenBtn" disabled>👨‍🍳 Kirim ke Dapur (cetak tiket)</button>
+              <button class="btn btn-primary" id="posCheckoutBtn" disabled>💾 Bayar & Cetak Struk</button>
+              <button class="btn btn-ghost btn-sm" id="posClearBtn">Kosongin</button>
+            </div>
+          </aside>
+        </div>
+
+        <!-- Riwayat pesanan hari ini -->
+        <div class="recent-entries mt-16">
+          <h3>Pesanan Hari Ini</h3>
+          <div id="todayPesananList">
+            <div class="empty-state">Belum ada pesanan hari ini.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Toast notification -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Scripts: config harus di-load duluan, lalu app.js -->
+  <script src="/assets/js/config.js"></script>
+  <script src="/assets/js/app.js"></script>
+</body>
+</html>

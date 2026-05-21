@@ -1,0 +1,12 @@
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+node_modules/
+.vercel
+*.log
+
+# Catatan: assets/js/config.js DI-COMMIT karena publishable key memang
+# untuk frontend (sama kayak anon key — bisa dilihat siapa pun di view-source).
+# TAPI buat repo ini PRIVATE supaya gak ke-index Google + ekstra safety.
+# JANGAN PERNAH commit secret_key / service_role key — itu cuma untuk Edge Functions.
