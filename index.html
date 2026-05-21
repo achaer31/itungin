@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/css/styles.css?v=20260521tetap" />
+  <link rel="stylesheet" href="/assets/css/styles.css?v=20260522belanja" />
 
   <!-- Supabase JS SDK (UMD) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -40,6 +40,7 @@
       <ul class="nav-tabs" id="navTabs">
         <li><a href="#/dashboard" data-view="dashboard">Dashboard</a></li>
         <li><a href="#/kasir" data-view="kasir" data-role="admin,kasir">🛒 Kasir</a></li>
+        <li><a href="#/belanja" data-view="belanja" data-role="admin">🛍 Belanja</a></li>
         <li><a href="#/input" data-view="input" data-role="admin">Input</a></li>
         <li><a href="#/rekap" data-view="rekap">Rekap</a></li>
         <li><a href="#/hpp" data-view="hpp" data-role="admin">HPP & Profit</a></li>
@@ -255,6 +256,110 @@
             <button class="btn btn-primary" id="saveBulkBtn">💾 Simpan Semua</button>
             <span class="text-muted" id="bulkStatus" style="font-size: 0.85rem;"></span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================
+         BELANJA (admin) — 1 pintu input belanja
+         ==================================================== -->
+    <section id="view-belanja" class="view">
+      <div class="container">
+        <div class="view-header">
+          <h1>🛍 <span class="accent">Belanja</span> hari ini.</h1>
+        </div>
+
+        <div class="bulk-help">
+          💡 Input belanja di sini sekali. Sistem otomatis:
+          (1) <strong>hitung ulang harga rata-rata bahan</strong> (moving average) → HPP menu auto-update,
+          (2) <strong>catat sebagai pengeluaran</strong> hari ini → muncul di Dashboard & Rekap.
+        </div>
+
+        <div class="settings-card" style="max-width: none;">
+          <h3 style="font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 14px;">Input Belanja Baru</h3>
+          <div style="display: grid; grid-template-columns: 130px 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin: 0;">
+              <label>Tanggal</label>
+              <input type="date" id="belanjaTanggal" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label>Bahan / Item</label>
+              <select id="belanjaBahan" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;">
+                <option value="">— Pilih bahan / atau "non-bahan" untuk operasional —</option>
+                <option value="__nonbahan__">⚙ Non-bahan (operasional/utility)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label>Kategori</label>
+              <select id="belanjaKategori" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;">
+                <option>Bahan</option>
+                <option>Packaging</option>
+                <option>Listrik & Gas</option>
+                <option>Iklan</option>
+                <option>Lain-lain</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="belanjaNonBahanFields" style="display: none; margin-bottom: 12px;">
+            <div class="form-group" style="margin: 0;">
+              <label>Nama Item (non-bahan)</label>
+              <input type="text" id="belanjaNamaCustom" placeholder="mis. Arang 5 karung, Token listrik, dll" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;" />
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 100px 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="form-group" style="margin: 0;">
+              <label>Qty (jumlah)</label>
+              <input type="text" inputmode="decimal" id="belanjaQty" placeholder="5" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600;" autocomplete="off" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label>Satuan</label>
+              <select id="belanjaSatuan" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;">
+                <option>kg</option>
+                <option>gram</option>
+                <option>liter</option>
+                <option>ml</option>
+                <option>pcs</option>
+                <option>porsi</option>
+                <option>gelas</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label>Total Harga (Rp)</label>
+              <input type="text" inputmode="numeric" id="belanjaTotal" class="number-input" placeholder="750.000" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600;" autocomplete="off" />
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
+            <div class="text-muted" id="belanjaPreview" style="font-size: 0.9rem;">
+              Harga per satuan akan otomatis dihitung.
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--cream-dim); cursor: pointer;">
+                <input type="checkbox" id="belanjaMasukHpp" checked style="width: 16px; height: 16px;" />
+                Masuk HPP
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Catatan (opsional)</label>
+            <input type="text" id="belanjaCatatan" placeholder="mis. beli di pasar Bintaro, sama Pak Joko" style="padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; width: 100%;" autocomplete="off" />
+          </div>
+
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" id="belanjaSaveBtn">💾 Simpan Belanja</button>
+            <button class="btn btn-ghost" id="belanjaResetBtn">Reset</button>
+          </div>
+        </div>
+
+        <div class="settings-card mt-16" style="max-width: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; flex-wrap: wrap;">
+            <h3 style="font-family: var(--font-display); font-size: 1.2rem; margin: 0;">Riwayat Belanja</h3>
+            <input type="month" id="belanjaMonth" style="padding: 8px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px;" />
+          </div>
+          <div id="belanjaList"><div class="loading">Memuat…</div></div>
         </div>
       </div>
     </section>
@@ -554,7 +659,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- Scripts: config harus di-load duluan, lalu app.js -->
-  <script src="/assets/js/config.js?v=20260521tetap"></script>
-  <script src="/assets/js/app.js?v=20260521tetap"></script>
+  <script src="/assets/js/config.js?v=20260522belanja"></script>
+  <script src="/assets/js/app.js?v=20260522belanja"></script>
 </body>
 </html>

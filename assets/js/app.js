@@ -266,6 +266,7 @@ function handleRoute() {
   if (view === 'pengaturan') loadPengaturan();
   if (view === 'hpp')        loadHpp();
   if (view === 'kasir')      loadKasir();
+  if (view === 'belanja')    loadBelanja();
 }
 
 /* ============ 6. DATA LAYER ============ */
@@ -1325,19 +1326,35 @@ function computeHpp(menuId, resepList = stateResep, bahanList = stateBahan) {
   items.forEach(r => {
     const b = bahanList.find(x => x.id === r.bahan_id);
     if (!b) return;
-    total += Number(r.jumlah) * Number(b.harga_per_satuan);
+    // Pakai harga rata-rata (moving average dari Belanja) — fallback ke harga_per_satuan
+    const harga = Number(b.harga_rata_rata) || Number(b.harga_per_satuan) || 0;
+    total += Number(r.jumlah) * harga;
   });
   return total;
 }
 
 function renderHppTable() {
   const p = statePengaturan;
+  // Helper: tampilkan label ESTIMASI di atas tabel
+  const helpBox = `<div class="bulk-help" style="margin-bottom: 14px;">
+    ⚠️ <strong>Label: ESTIMASI</strong> — angka di tabel ini pakai harga rata-rata bahan (moving average dari Belanja) untuk hitung HPP & margin per menu.
+    Untuk angka <strong>profit asli</strong> bulanan (kebenaran cuan), cek Dashboard "Laba Bersih Bulan Ini" — itu Omzet − total Pengeluaran periode, bukan estimasi.
+  </div>`;
+  const tableContainer = $('#hppHitung');
+  // Inject helpBox sekali (kalau belum ada)
+  if (!tableContainer.querySelector('.bulk-help')) {
+    const existingHelp = tableContainer.querySelector('.bulk-help');
+    if (!existingHelp) {
+      tableContainer.insertAdjacentHTML('afterbegin', helpBox);
+    }
+  }
+
   const thead = $('#hppTable thead');
   thead.innerHTML = `
     <tr>
       <th class="menu-col">Menu</th>
       <th>Harga Jual</th>
-      <th>HPP</th>
+      <th>HPP <span style="font-size: 0.65rem; color: var(--amber); margin-left: 4px;">ESTIMASI</span></th>
       <th>Profit (WA/Dine-in)</th>
       <th>Margin %</th>
       <th class="channel-header">GoFood −${p.komisi_gofood}%</th>
@@ -1448,6 +1465,249 @@ async function deleteBahan(id) {
   await fetchResep();
   renderBahanTable();
   toast('Bahan dihapus.');
+}
+
+/* ===== BELANJA (1-pintu input → moving average + auto pengeluaran) ===== */
+
+async function loadBelanja() {
+  await Promise.all([fetchBahan(), fetchMenu(), fetchResep()]);
+  // Default tanggal hari ini
+  const dt = $('#belanjaTanggal');
+  if (!dt.value) dt.value = todayISO();
+  const mt = $('#belanjaMonth');
+  if (!mt.value) mt.value = currentYearMonth();
+  populateBelanjaBahanDropdown();
+  wireBelanjaForm();
+  await renderBelanjaList();
+}
+
+function populateBelanjaBahanDropdown() {
+  const sel = $('#belanjaBahan');
+  const current = sel.value;
+  sel.innerHTML = `
+    <option value="">— Pilih bahan / atau "non-bahan" untuk operasional —</option>
+    <option value="__nonbahan__">⚙ Non-bahan (operasional/utility)</option>
+    ${stateBahan.map(b => `<option value="${b.id}" data-satuan="${b.satuan}" data-harga="${b.harga_rata_rata || b.harga_per_satuan}">${escapeHtml(b.nama)} (per ${b.satuan}, avg Rp ${fmtNumber(b.harga_rata_rata || b.harga_per_satuan)})</option>`).join('')}
+  `;
+  if (current) sel.value = current;
+}
+
+function wireBelanjaForm() {
+  const selBahan   = $('#belanjaBahan');
+  const fields     = $('#belanjaNonBahanFields');
+  const satuanSel  = $('#belanjaSatuan');
+  const qtyInp     = $('#belanjaQty');
+  const totalInp   = $('#belanjaTotal');
+  const preview    = $('#belanjaPreview');
+  const kategoriSel = $('#belanjaKategori');
+
+  const updatePreview = () => {
+    const qty = parseFloat(qtyInp.value.replace(',', '.')) || 0;
+    const total = parseNum(totalInp.value);
+    if (qty > 0 && total > 0) {
+      const perSatuan = total / qty;
+      preview.innerHTML = `Harga per ${satuanSel.value || 'satuan'}: <strong style="color: var(--ember);">${fmtRp(perSatuan)}</strong>`;
+    } else {
+      preview.innerHTML = 'Harga per satuan akan otomatis dihitung.';
+    }
+  };
+
+  selBahan.onchange = () => {
+    if (selBahan.value === '__nonbahan__') {
+      fields.style.display = '';
+      kategoriSel.value = 'Lain-lain';
+    } else if (selBahan.value) {
+      fields.style.display = 'none';
+      const opt = selBahan.options[selBahan.selectedIndex];
+      satuanSel.value = opt.dataset.satuan || 'kg';
+      kategoriSel.value = 'Bahan';
+    } else {
+      fields.style.display = 'none';
+    }
+    updatePreview();
+  };
+  qtyInp.oninput = updatePreview;
+  totalInp.addEventListener('input', updatePreview);
+  satuanSel.onchange = updatePreview;
+
+  $('#belanjaSaveBtn').onclick = saveBelanja;
+  $('#belanjaResetBtn').onclick = resetBelanjaForm;
+  $('#belanjaMonth').onchange = renderBelanjaList;
+}
+
+function resetBelanjaForm() {
+  $('#belanjaBahan').value = '';
+  $('#belanjaNamaCustom').value = '';
+  $('#belanjaNonBahanFields').style.display = 'none';
+  $('#belanjaQty').value = '';
+  $('#belanjaTotal').value = '';
+  $('#belanjaCatatan').value = '';
+  $('#belanjaMasukHpp').checked = true;
+  $('#belanjaPreview').textContent = 'Harga per satuan akan otomatis dihitung.';
+}
+
+async function saveBelanja() {
+  const tanggal  = $('#belanjaTanggal').value || todayISO();
+  const bahanVal = $('#belanjaBahan').value;
+  const qty      = parseFloat($('#belanjaQty').value.replace(',', '.')) || 0;
+  const total    = parseNum($('#belanjaTotal').value);
+  const satuan   = $('#belanjaSatuan').value;
+  const kategori = $('#belanjaKategori').value;
+  const catatan  = $('#belanjaCatatan').value.trim() || null;
+  const masukHpp = $('#belanjaMasukHpp').checked;
+
+  if (qty <= 0)   { toast('Qty harus > 0', 'error'); return; }
+  if (total <= 0) { toast('Total harga harus > 0', 'error'); return; }
+
+  let bahanId = null;
+  let namaItem = '';
+
+  if (bahanVal === '__nonbahan__') {
+    namaItem = $('#belanjaNamaCustom').value.trim();
+    if (!namaItem) { toast('Isi nama item dulu', 'error'); return; }
+  } else if (bahanVal) {
+    bahanId = parseInt(bahanVal);
+    const bahan = stateBahan.find(b => b.id === bahanId);
+    if (!bahan) { toast('Bahan tidak ditemukan', 'error'); return; }
+    namaItem = bahan.nama;
+  } else {
+    toast('Pilih bahan dulu', 'error'); return;
+  }
+
+  const hargaPerSatuan = total / qty;
+  const btn = $('#belanjaSaveBtn');
+  btn.disabled = true; btn.textContent = 'Menyimpan…';
+
+  try {
+    // 1. Insert belanja (dapatkan id-nya)
+    const { data: belanjaRow, error: bErr } = await supa.from('belanja').insert({
+      tanggal,
+      bahan_id: bahanId,
+      nama_item: namaItem,
+      kategori,
+      qty,
+      satuan,
+      total_harga: total,
+      harga_per_satuan: hargaPerSatuan,
+      masuk_hpp: masukHpp,
+      jenis_biaya: 'variabel',
+      catatan,
+      dibuat_oleh: session.username
+    }).select().single();
+    if (bErr) throw bErr;
+
+    // 2. Kalau ada bahan_id → update moving average di tabel bahan
+    if (bahanId) {
+      const bahan = stateBahan.find(b => b.id === bahanId);
+      const oldQty = Number(bahan.qty_stok) || 0;
+      const oldAvg = Number(bahan.harga_rata_rata) || Number(bahan.harga_per_satuan) || 0;
+
+      // Convert qty belanja ke satuan bahan
+      const qtyInBahanUnit = convertToBahanUnit(qty, satuan, bahan.satuan);
+      const totalNewQty = oldQty + qtyInBahanUnit;
+      const oldNilai = oldQty * oldAvg;
+      const newAvg = totalNewQty > 0 ? (oldNilai + total) / totalNewQty : (total / qtyInBahanUnit);
+
+      await supa.from('bahan').update({
+        harga_rata_rata: newAvg,
+        harga_per_satuan: newAvg,  // sync untuk backward compat
+        qty_stok: totalNewQty
+      }).eq('id', bahanId);
+
+      // Update state cache
+      bahan.harga_rata_rata = newAvg;
+      bahan.harga_per_satuan = newAvg;
+      bahan.qty_stok = totalNewQty;
+    }
+
+    // 3. Auto-insert sebagai transaksi pengeluaran (biar muncul di Rekap & Dashboard)
+    const { data: txRow } = await supa.from('transaksi').insert({
+      tanggal,
+      tipe: 'pengeluaran',
+      kategori,
+      nominal: total,
+      catatan: `[Belanja] ${namaItem} · ${qty} ${satuan} @ ${fmtRp(hargaPerSatuan)}${catatan ? ' — ' + catatan : ''}`,
+      dibuat_oleh: session.username
+    }).select().single();
+
+    // Link kembali belanja.transaksi_id
+    if (txRow) {
+      await supa.from('belanja').update({ transaksi_id: txRow.id }).eq('id', belanjaRow.id);
+    }
+
+    btn.disabled = false; btn.textContent = '💾 Simpan Belanja';
+    toast(`✓ Belanja ${namaItem} tersimpan (Rp ${fmtNumber(total)})${bahanId ? ' — HPP menu auto-update' : ''}`, 'success');
+    resetBelanjaForm();
+    populateBelanjaBahanDropdown();
+    await renderBelanjaList();
+  } catch (err) {
+    btn.disabled = false; btn.textContent = '💾 Simpan Belanja';
+    toast('Gagal: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+async function renderBelanjaList() {
+  const el = $('#belanjaList');
+  const ym = $('#belanjaMonth').value || currentYearMonth();
+  const range = monthRange(ym);
+  const { data, error } = await supa.from('belanja')
+    .select('*')
+    .gte('tanggal', range.start)
+    .lte('tanggal', range.end)
+    .order('tanggal', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (error) { el.innerHTML = '<div class="empty-state">Gagal load: ' + error.message + '</div>'; return; }
+  const items = data || [];
+  if (items.length === 0) { el.innerHTML = '<div class="empty-state">Belum ada belanja bulan ini.</div>'; return; }
+
+  const totalBulan = items.reduce((s, x) => s + Number(x.total_harga), 0);
+  const isAdmin = session.role === 'admin';
+
+  el.innerHTML = `
+    <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 12px;">${items.length} entri · Total bulan ini: <strong style="color: var(--amber);">${fmtRp(totalBulan)}</strong></p>
+    <table class="detail-table">
+      <thead>
+        <tr>
+          <th>Tanggal</th>
+          <th>Item</th>
+          <th>Qty</th>
+          <th>Harga/Satuan</th>
+          <th>Total</th>
+          <th>Catatan</th>
+          ${isAdmin ? '<th></th>' : ''}
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(b => `
+          <tr data-id="${b.id}">
+            <td class="tanggal">${fmtDateShort(b.tanggal)}</td>
+            <td><strong>${escapeHtml(b.nama_item)}</strong><div style="font-size: 0.72rem; color: var(--cream-dim); margin-top: 2px;">${b.kategori}${b.masuk_hpp ? ' · 🟠 HPP' : ' · ⚪ ops'}</div></td>
+            <td class="nominal" style="color: var(--cream);">${b.qty} ${b.satuan}</td>
+            <td class="nominal" style="color: var(--cream-dim);">${fmtRp(b.harga_per_satuan)}</td>
+            <td class="nominal">${fmtRp(b.total_harga)}</td>
+            <td class="catatan-cell ${!b.catatan ? 'empty' : ''}">${b.catatan ? escapeHtml(b.catatan) : '—'}</td>
+            ${isAdmin ? `<td class="actions"><button class="delete delete-belanja-btn" data-del-id="${b.id}" title="Hapus">🗑</button></td>` : ''}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`;
+
+  $$('.delete-belanja-btn').forEach(b => b.addEventListener('click', () => deleteBelanja(parseInt(b.dataset.delId))));
+}
+
+async function deleteBelanja(id) {
+  if (!confirm('Hapus entri belanja ini?\n\n⚠️ Pengeluaran terkait juga akan ikut hilang.\n⚠️ Harga rata-rata bahan TIDAK auto-rollback (harus hitung manual kalau perlu).')) return;
+  // Hapus transaksi terkait dulu
+  const { data: b } = await supa.from('belanja').select('transaksi_id').eq('id', id).single();
+  if (b?.transaksi_id) {
+    await supa.from('transaksi').delete().eq('id', b.transaksi_id);
+  }
+  const { error } = await supa.from('belanja').delete().eq('id', id);
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  toast('Entri belanja & pengeluaran terkait dihapus.', 'success');
+  renderBelanjaList();
 }
 
 /* ===== MENU CRUD ===== */

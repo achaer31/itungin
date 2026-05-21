@@ -96,18 +96,50 @@ BEGIN
 END $$;
 
 -- ================================================================
--- TABLE: bahan (master bahan baku)
+-- TABLE: bahan (master bahan baku) — extended dengan moving average
+-- harga_rata_rata = harga rata-rata tertimbang dari semua Belanja
+-- yield_per_kg    = produksi tusuk per kg (khusus daging)
+-- qty_stok        = sisa stok untuk weight di moving average
+-- masuk_hpp       = TRUE kalau biaya ini di-allocate ke HPP per menu
+-- jenis_biaya     = 'variabel' (bahan/packaging) atau 'tetap' (sewa/gaji)
 -- ================================================================
 CREATE TABLE IF NOT EXISTS public.bahan (
   id                BIGSERIAL PRIMARY KEY,
   nama              TEXT NOT NULL,
-  satuan            TEXT NOT NULL CHECK (satuan IN ('kg','gram','liter','ml','pcs','porsi')),
+  satuan            TEXT NOT NULL CHECK (satuan IN ('kg','gram','liter','ml','pcs','porsi','gelas')),
   harga_per_satuan  NUMERIC(15, 2) NOT NULL DEFAULT 0,
+  harga_rata_rata   NUMERIC(15, 2),
+  qty_stok          NUMERIC(15, 4) NOT NULL DEFAULT 0,
+  yield_per_kg      INT,
+  masuk_hpp         BOOLEAN NOT NULL DEFAULT TRUE,
+  jenis_biaya       TEXT NOT NULL DEFAULT 'variabel' CHECK (jenis_biaya IN ('variabel','tetap')),
   catatan           TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bahan_nama ON public.bahan (LOWER(nama));
+
+-- Migration kalau tabel sudah ada (versi lama)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema='public' AND table_name='bahan' AND column_name='harga_rata_rata') THEN
+    ALTER TABLE public.bahan ADD COLUMN harga_rata_rata NUMERIC(15, 2);
+    ALTER TABLE public.bahan ADD COLUMN qty_stok        NUMERIC(15, 4) NOT NULL DEFAULT 0;
+    ALTER TABLE public.bahan ADD COLUMN yield_per_kg    INT;
+    ALTER TABLE public.bahan ADD COLUMN masuk_hpp       BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE public.bahan ADD COLUMN jenis_biaya     TEXT NOT NULL DEFAULT 'variabel';
+  END IF;
+END $$;
+-- Tambah opsi satuan baru kalau check constraint lama gak include 'gelas'
+DO $$
+BEGIN
+  ALTER TABLE public.bahan DROP CONSTRAINT IF EXISTS bahan_satuan_check;
+  ALTER TABLE public.bahan ADD CONSTRAINT bahan_satuan_check
+    CHECK (satuan IN ('kg','gram','liter','ml','pcs','porsi','gelas'));
+END $$;
+-- Bootstrap harga_rata_rata = harga_per_satuan untuk row existing yang masih NULL
+UPDATE public.bahan SET harga_rata_rata = harga_per_satuan WHERE harga_rata_rata IS NULL;
 
 DROP TRIGGER IF EXISTS trg_bahan_updated_at ON public.bahan;
 CREATE TRIGGER trg_bahan_updated_at
@@ -323,6 +355,43 @@ CREATE TRIGGER trg_pengeluaran_tetap_updated_at
 ALTER TABLE public.pengeluaran_tetap ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "anon_all_pengeluaran_tetap" ON public.pengeluaran_tetap;
 CREATE POLICY "anon_all_pengeluaran_tetap" ON public.pengeluaran_tetap FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- ================================================================
+-- TABLE: belanja (1 pintu input belanja → auto moving average + auto pengeluaran)
+-- Setiap row di-link ke 1 bahan_id (kalau ada master bahan) atau standalone (operasional).
+-- Trigger: setelah insert, app update bahan.harga_rata_rata + bahan.qty_stok,
+--          plus auto-insert ke transaksi (tipe='pengeluaran') sebagai laporan.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS public.belanja (
+  id                BIGSERIAL PRIMARY KEY,
+  tanggal           DATE NOT NULL DEFAULT CURRENT_DATE,
+  bahan_id          BIGINT REFERENCES public.bahan(id) ON DELETE SET NULL,
+  nama_item         TEXT NOT NULL,                    -- snapshot nama (kalau bahan dihapus)
+  kategori          TEXT NOT NULL,                    -- mis. 'Bahan', 'Packaging', 'Listrik & Gas', dst
+  qty               NUMERIC(15, 4) NOT NULL,
+  satuan            TEXT NOT NULL,
+  total_harga       NUMERIC(15, 2) NOT NULL,
+  harga_per_satuan  NUMERIC(15, 2) NOT NULL,          -- = total_harga / qty
+  masuk_hpp         BOOLEAN NOT NULL DEFAULT TRUE,
+  jenis_biaya       TEXT NOT NULL DEFAULT 'variabel' CHECK (jenis_biaya IN ('variabel','tetap')),
+  catatan           TEXT,
+  dibuat_oleh       TEXT,
+  transaksi_id      BIGINT REFERENCES public.transaksi(id) ON DELETE SET NULL,  -- link ke auto-created pengeluaran
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_belanja_tanggal  ON public.belanja (tanggal DESC);
+CREATE INDEX IF NOT EXISTS idx_belanja_bahan    ON public.belanja (bahan_id);
+CREATE INDEX IF NOT EXISTS idx_belanja_kategori ON public.belanja (kategori);
+
+DROP TRIGGER IF EXISTS trg_belanja_updated_at ON public.belanja;
+CREATE TRIGGER trg_belanja_updated_at
+  BEFORE UPDATE ON public.belanja
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.belanja ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "anon_all_belanja" ON public.belanja;
+CREATE POLICY "anon_all_belanja" ON public.belanja FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ================================================================
 -- STORAGE BUCKET: menu-photos (untuk upload foto menu langsung dari app)
