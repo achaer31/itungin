@@ -1659,6 +1659,13 @@ function printReceipt(pesanan, items) {
 
 async function checkoutPos() {
   if (cart.length === 0) return;
+
+  // Kalau QRIS → lewat flow Xendit (save pesanan + generate QR + tunggu lunas)
+  if (posMetodeBayar === 'QRIS') {
+    return checkoutQris();
+  }
+
+  // Tunai flow (default)
   const btn = $('#posCheckoutBtn');
   btn.disabled = true; btn.textContent = 'Menyimpan…';
 
@@ -1730,6 +1737,223 @@ async function checkoutPos() {
   renderPosMenuGrid();
   await refreshTodayPesanan();
 }
+
+/* ============ QRIS DINAMIS via Xendit ============ */
+let qrisPollInterval = null;
+let qrisCountdownInterval = null;
+
+async function checkoutQris() {
+  const btn = $('#posCheckoutBtn');
+  btn.disabled = true; btn.textContent = 'Generating QR…';
+
+  const total = cart.reduce((s, c) => s + (c.harga * c.qty), 0);
+  const totalHpp = cart.reduce((s, c) => s + (c.hpp * c.qty), 0);
+  const meja = $('#posMejaNama').value.trim();
+
+  // 1. Pastikan pesanan tersimpan (atau update kalau sudah dikirim ke dapur)
+  let pesananId = currentPesananId;
+  let pesananData;
+  if (pesananId) {
+    const { data, error } = await supa.from('pesanan').update({
+      total, total_hpp: totalHpp, metode_bayar: 'QRIS',
+      meja_atau_nama: meja || null, status: 'selesai'
+    }).eq('id', pesananId).select().single();
+    if (error) {
+      btn.disabled = false; btn.textContent = '💾 Bayar & Cetak Struk';
+      toast('Gagal update pesanan: ' + error.message, 'error'); return;
+    }
+    pesananData = data;
+    await supa.from('pesanan_item').delete().eq('pesanan_id', pesananId);
+    await supa.from('pesanan_item').insert(cart.map(c => ({
+      pesanan_id: pesananId, menu_id: c.menu_id, nama_menu: c.nama,
+      qty: c.qty, harga: c.harga, hpp: c.hpp, subtotal: c.harga * c.qty,
+      catatan: c.catatan || null
+    })));
+  } else {
+    const { data, error } = await supa.from('pesanan').insert({
+      channel: posChannel, kasir: session.username,
+      total, total_hpp: totalHpp, metode_bayar: 'QRIS',
+      meja_atau_nama: meja || null, status: 'selesai'
+    }).select().single();
+    if (error) {
+      btn.disabled = false; btn.textContent = '💾 Bayar & Cetak Struk';
+      toast('Gagal: ' + error.message, 'error'); return;
+    }
+    pesananData = data;
+    pesananId = data.id;
+    currentPesananId = pesananId;
+    await supa.from('pesanan_item').insert(cart.map(c => ({
+      pesanan_id: pesananId, menu_id: c.menu_id, nama_menu: c.nama,
+      qty: c.qty, harga: c.harga, hpp: c.hpp, subtotal: c.harga * c.qty,
+      catatan: c.catatan || null
+    })));
+  }
+
+  // 2. Call Edge Function create-qris
+  let qrData;
+  try {
+    const res = await fetch(CFG.XENDIT_CREATE_QRIS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + CFG.SUPABASE_ANON_KEY,
+        'apikey': CFG.SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({ pesanan_id: pesananId, amount: total })
+    });
+    qrData = await res.json();
+    if (!res.ok || !qrData.qr_string) {
+      throw new Error(qrData.error || 'create-qris gagal');
+    }
+  } catch (err) {
+    btn.disabled = false; btn.textContent = '💾 Bayar & Cetak Struk';
+    toast('QR gagal: ' + err.message + ' — coba Tunai dulu.', 'error');
+    return;
+  }
+
+  btn.disabled = false; btn.textContent = '💾 Bayar & Cetak Struk';
+
+  // 3. Render QR modal
+  showQrisModal(pesananData, qrData, total);
+}
+
+function showQrisModal(pesanan, qrData, total) {
+  // Cleanup previous polling kalau ada
+  if (qrisPollInterval) clearInterval(qrisPollInterval);
+  if (qrisCountdownInterval) clearInterval(qrisCountdownInterval);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'qris-modal-overlay';
+  overlay.id = 'qrisModalOverlay';
+  overlay.innerHTML = `
+    <div class="qris-modal">
+      <div class="qris-header">
+        <h2>Scan QRIS untuk Bayar</h2>
+        <button class="modal-close" id="qrisCloseBtn" aria-label="Tutup">✕</button>
+      </div>
+      <div class="qris-amount">${fmtRp(total)}</div>
+      <div class="qris-info">Pesanan #${pesanan.id} · ${pesanan.channel}${pesanan.meja_atau_nama ? ' · ' + pesanan.meja_atau_nama : ''}</div>
+
+      <div class="qris-canvas-wrap">
+        <canvas id="qrisCanvas"></canvas>
+      </div>
+
+      <div class="qris-status" id="qrisStatus">
+        <span class="qris-status-icon">⏳</span>
+        <span class="qris-status-text">Menunggu pembayaran…</span>
+      </div>
+
+      <div class="qris-meta">
+        <div>Expire dalam: <strong id="qrisCountdown">15:00</strong></div>
+        <div class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">Buka aplikasi e-wallet / mobile banking → Scan QR</div>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button class="btn btn-ghost btn-sm" id="qrisCancelBtn" style="flex: 1;">Batalkan & Bayar Tunai</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // Render QR
+  QRCode.toCanvas(document.getElementById('qrisCanvas'), qrData.qr_string, {
+    width: 280,
+    margin: 1,
+    color: { dark: '#16100c', light: '#f4ead7' }
+  }, (err) => {
+    if (err) console.error('QR render error:', err);
+  });
+
+  // Close button → konfirmasi cancel
+  $('#qrisCloseBtn').onclick = () => cancelQris(pesanan.id);
+  $('#qrisCancelBtn').onclick = () => cancelQris(pesanan.id);
+
+  // Countdown timer
+  const expiresAt = new Date(qrData.expires_at).getTime();
+  qrisCountdownInterval = setInterval(() => {
+    const diff = expiresAt - Date.now();
+    if (diff <= 0) {
+      clearInterval(qrisCountdownInterval);
+      $('#qrisCountdown').textContent = 'Expired';
+      updateQrisStatusUI('expired');
+      stopQrisPolling();
+      return;
+    }
+    const m = Math.floor(diff / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    $('#qrisCountdown').textContent = `${m}:${String(s).padStart(2, '0')}`;
+  }, 1000);
+
+  // Poll pembayaran status tiap 2 detik
+  qrisPollInterval = setInterval(() => pollQrisStatus(pesanan.id, qrData.pembayaran_id), 2000);
+}
+
+async function pollQrisStatus(pesananId, pembayaranId) {
+  const { data, error } = await supa
+    .from('pembayaran')
+    .select('status')
+    .eq('id', pembayaranId)
+    .single();
+  if (error || !data) return;
+
+  if (data.status === 'LUNAS') {
+    stopQrisPolling();
+    updateQrisStatusUI('lunas');
+    // Tunggu 1 detik supaya user lihat status berubah, lalu cetak struk + close
+    setTimeout(async () => {
+      const { data: p } = await supa.from('pesanan').select('*').eq('id', pesananId).single();
+      const itemsForPrint = cart.map(c => ({ nama_menu: c.nama, qty: c.qty, harga: c.harga, hpp: c.hpp }));
+      printReceipt(p, itemsForPrint);
+      closeQrisModal();
+      cart = [];
+      currentPesananId = null;
+      $('#posMejaNama').value = '';
+      $('#posSendKitchenBtn').textContent = '👨‍🍳 Kirim ke Dapur (cetak tiket)';
+      renderCart();
+      renderPosMenuGrid();
+      await refreshTodayPesanan();
+      toast(`✓ Pembayaran QRIS pesanan #${pesananId} lunas`, 'success');
+    }, 1200);
+  } else if (data.status === 'EXPIRED' || data.status === 'GAGAL') {
+    stopQrisPolling();
+    updateQrisStatusUI(data.status.toLowerCase());
+  }
+}
+
+function updateQrisStatusUI(status) {
+  const el = $('#qrisStatus');
+  if (!el) return;
+  const map = {
+    lunas:   { icon: '✓', text: 'Pembayaran berhasil!', cls: 'lunas' },
+    expired: { icon: '⏰', text: 'QR expired — buat ulang atau bayar tunai', cls: 'expired' },
+    gagal:   { icon: '✕', text: 'Pembayaran gagal', cls: 'gagal' }
+  };
+  const m = map[status] || { icon: '⏳', text: 'Menunggu pembayaran…', cls: '' };
+  el.className = 'qris-status ' + m.cls;
+  el.querySelector('.qris-status-icon').textContent = m.icon;
+  el.querySelector('.qris-status-text').textContent = m.text;
+}
+
+function stopQrisPolling() {
+  if (qrisPollInterval) { clearInterval(qrisPollInterval); qrisPollInterval = null; }
+  if (qrisCountdownInterval) { clearInterval(qrisCountdownInterval); qrisCountdownInterval = null; }
+}
+
+function closeQrisModal() {
+  stopQrisPolling();
+  $('#qrisModalOverlay')?.remove();
+}
+
+async function cancelQris(pesananId) {
+  if (!confirm('Batalkan QRIS & ganti ke Tunai?\n\nPesanan tetap tersimpan, kamu bisa Bayar lagi dengan Tunai.')) return;
+  stopQrisPolling();
+  closeQrisModal();
+  // Switch ke Tunai
+  posMetodeBayar = 'Tunai';
+  $$('.pos-channel-pill[data-bayar]').forEach(b => b.classList.toggle('active', b.dataset.bayar === 'Tunai'));
+  toast('Switch ke Tunai — klik Bayar lagi untuk selesaikan.', 'success');
+}
+
+/* ============ END QRIS ============ */
 
 async function refreshTodayPesanan() {
   const today = todayISO();

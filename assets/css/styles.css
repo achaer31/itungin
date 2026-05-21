@@ -982,6 +982,119 @@ body.unauthenticated #view-login { display: flex; }
 }
 .menu-row.inactive td { opacity: 0.5; }
 
+/* QRIS Payment Modal */
+.qris-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 6, 4, 0.92);
+  backdrop-filter: blur(8px);
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.qris-modal {
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  padding: 28px 24px;
+  max-width: 380px;
+  width: 100%;
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  position: relative;
+}
+.qris-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.qris-header h2 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+.qris-header .modal-close {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: rgba(244, 234, 215, 0.05);
+  color: var(--cream-dim);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.qris-header .modal-close:hover {
+  background: var(--ember);
+  color: #1a0e07;
+}
+.qris-amount {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--ember);
+  font-variant-numeric: tabular-nums;
+  margin: 8px 0 4px;
+}
+.qris-info {
+  font-size: 0.85rem;
+  color: var(--cream-dim);
+  margin-bottom: 18px;
+}
+.qris-canvas-wrap {
+  background: var(--cream);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: inline-block;
+  margin-bottom: 16px;
+  box-shadow: 0 0 0 2px var(--ember), 0 8px 24px rgba(232, 115, 44, 0.25);
+}
+.qris-canvas-wrap canvas {
+  display: block;
+  max-width: 100%;
+}
+.qris-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(244, 234, 215, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+  transition: all 0.3s;
+}
+.qris-status .qris-status-icon {
+  font-size: 1.3rem;
+}
+.qris-status.lunas {
+  background: rgba(74, 222, 128, 0.15);
+  border-color: rgba(74, 222, 128, 0.4);
+  color: var(--green);
+  animation: pulse-success 0.5s ease;
+}
+.qris-status.expired, .qris-status.gagal {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--red);
+}
+@keyframes pulse-success {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.qris-meta {
+  font-size: 0.9rem;
+  color: var(--cream);
+  margin-bottom: 4px;
+}
+.qris-meta strong {
+  font-family: var(--font-display);
+  color: var(--ember);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Foto URL modal */
 .foto-modal-overlay {
   position: fixed;

@@ -15,5 +15,9 @@ window.ITUNGIN_CONFIG = {
   ],
   PASSWORD: "satejavva2026",
 
-  DEFAULT_TARGET_BULANAN: 10000000
+  DEFAULT_TARGET_BULANAN: 10000000,
+
+  // Xendit QRIS: URL Edge Function create-qris di Supabase.
+  // Format: https://YOUR-PROJECT.supabase.co/functions/v1/create-qris
+  XENDIT_CREATE_QRIS_URL: "https://fvvdkdfmblxscapcyjjj.supabase.co/functions/v1/create-qris"
 };
