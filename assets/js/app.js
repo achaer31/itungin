@@ -1503,13 +1503,81 @@ async function refreshTodayPesanan() {
     const items = itemsByPesanan[p.id] || [];
     const itemNames = items.map(it => `${it.nama_menu} ×${it.qty}`).join(', ');
     const time = new Date(p.waktu).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="pesanan-row">
+    const canDelete = session.role === 'admin';
+    return `<div class="pesanan-row" data-id="${p.id}">
       <span class="time">${time}</span>
       <span class="channel-badge">${p.channel}</span>
       <span class="items">${itemNames}${p.meja_atau_nama ? ' · ' + p.meja_atau_nama : ''}</span>
       <span class="total">${fmtRp(p.total)}</span>
+      <span class="pesanan-actions">
+        <button class="icon-btn edit-pesanan" data-edit="${p.id}" title="Edit / tambah-kurangi item">✏️</button>
+        <button class="icon-btn reprint-pesanan" data-reprint="${p.id}" title="Cetak ulang tiket dapur">🖨</button>
+        ${canDelete ? `<button class="icon-btn delete delete-pesanan" data-del="${p.id}" title="Hapus pesanan (admin)">🗑</button>` : ''}
+      </span>
     </div>`;
   }).join('');
+
+  $$('[data-edit]', el).forEach(b => b.addEventListener('click', () => editPesanan(parseInt(b.dataset.edit), list, itemsByPesanan)));
+  $$('[data-reprint]', el).forEach(b => b.addEventListener('click', () => reprintTiket(parseInt(b.dataset.reprint), list, itemsByPesanan)));
+  $$('[data-del]', el).forEach(b => b.addEventListener('click', () => deletePesanan(parseInt(b.dataset.del))));
+}
+
+function editPesanan(id, list, itemsByPesanan) {
+  const p = list.find(x => x.id === id);
+  if (!p) return;
+  if (cart.length > 0 && !confirm('Keranjang masih ada isinya. Ganti dengan pesanan ini?')) return;
+
+  const items = itemsByPesanan[id] || [];
+  cart = items.map(it => ({
+    menu_id: it.menu_id,
+    nama: it.nama_menu,
+    harga: Number(it.harga),
+    hpp: Number(it.hpp),
+    qty: it.qty,
+    catatan: it.catatan || ''
+  }));
+  currentPesananId = id;
+  posChannel = p.channel;
+  posMetodeBayar = p.metode_bayar || 'Tunai';
+  $('#posMejaNama').value = p.meja_atau_nama || '';
+
+  // Update channel pills
+  $$('.pos-channel-pill[data-channel]').forEach(b => b.classList.toggle('active', b.dataset.channel === posChannel));
+  $$('.pos-channel-pill[data-bayar]').forEach(b => b.classList.toggle('active', b.dataset.bayar === posMetodeBayar));
+  $('#posSendKitchenBtn').textContent = '🔁 Update & Cetak Tiket';
+
+  renderCart();
+  renderPosMenuGrid();
+  // Scroll ke atas supaya cart kelihatan
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast(`Edit pesanan #${id} — tambah/kurangi item, lalu klik Update`, 'success');
+}
+
+function reprintTiket(id, list, itemsByPesanan) {
+  const p = list.find(x => x.id === id);
+  if (!p) return;
+  const items = (itemsByPesanan[id] || []).map(it => ({
+    nama_menu: it.nama_menu, qty: it.qty, catatan: it.catatan
+  }));
+  printKitchenTicket(p, items);
+}
+
+async function deletePesanan(id) {
+  if (session.role !== 'admin') {
+    toast('Hanya admin yang boleh hapus pesanan.', 'error');
+    return;
+  }
+  if (!confirm(`Hapus pesanan #${id}?\nPemasukan dari pesanan ini akan ikut hilang dari laporan.`)) return;
+  const { error } = await supa.from('pesanan').delete().eq('id', id);
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  toast(`Pesanan #${id} dihapus.`, 'success');
+  if (currentPesananId === id) {
+    currentPesananId = null;
+    cart = [];
+    renderCart();
+    renderPosMenuGrid();
+  }
+  await refreshTodayPesanan();
 }
 
 /* ============ 13. INIT ============ */
