@@ -861,10 +861,11 @@ async function loadPengaturan() {
 
 async function savePengaturan() {
   const target  = parseNum($('#settingTarget').value);
-  const kGo     = parseNum($('#komisiGofood').value);
-  const kGrab   = parseNum($('#komisiGrab').value);
-  const kShopee = parseNum($('#komisiShopee').value);
-  const kWa     = parseNum($('#komisiWa').value);
+  // Komisi % adalah decimal (mis. 0.7% Xendit) — pakai parseFloat
+  const kGo     = parseFloat($('#komisiGofood').value)  || 0;
+  const kGrab   = parseFloat($('#komisiGrab').value)    || 0;
+  const kShopee = parseFloat($('#komisiShopee').value)  || 0;
+  const kWa     = parseFloat($('#komisiWa').value)      || 0;
 
   const btn = $('#saveSettingsBtn');
   btn.disabled = true; btn.textContent = 'Menyimpan…';
@@ -1009,7 +1010,23 @@ async function updateBahan(id, row) {
   if (idx >= 0) stateBahan[idx] = { ...stateBahan[idx], ...payload };
 }
 async function deleteBahan(id) {
-  if (!confirm('Hapus bahan ini? Resep yang pakai bahan ini juga akan hilang.')) return;
+  const bahan = stateBahan.find(b => b.id == id);
+  // Cek dulu apakah bahan ini dipakai di resep menu
+  await fetchResep();
+  const resepUses = stateResep.filter(r => r.bahan_id == id);
+  const menuNames = resepUses.map(r => stateMenu.find(m => m.id === r.menu_id)?.nama).filter(Boolean);
+
+  let msg = `Hapus bahan "${bahan?.nama}"?`;
+  if (resepUses.length > 0) {
+    msg += `\n\n⚠️ Bahan ini dipakai di ${resepUses.length} resep menu:\n${menuNames.map(n => '  • ' + n).join('\n')}\n\nResep yang pakai bahan ini akan ikut HILANG. Lanjutkan?`;
+  }
+  if (!confirm(msg)) return;
+
+  // Delete resep yang refer dulu (FK constraint RESTRICT)
+  if (resepUses.length > 0) {
+    const { error: resepErr } = await supa.from('resep').delete().eq('bahan_id', id);
+    if (resepErr) { toast('Gagal hapus resep: ' + resepErr.message, 'error'); return; }
+  }
   const { error } = await supa.from('bahan').delete().eq('id', id);
   if (error) { toast('Gagal: ' + error.message, 'error'); return; }
   stateBahan = stateBahan.filter(b => b.id != id);
@@ -1273,13 +1290,43 @@ function renderResepEditor(menuId) {
   recalcResepTotal();
 }
 
+// Konversi unit: kg ↔ gram, liter ↔ ml
+function getResepUnitOptions(satuanBahan) {
+  if (satuanBahan === 'kg')    return ['kg', 'gram'];
+  if (satuanBahan === 'liter') return ['liter', 'ml'];
+  return [satuanBahan || ''];
+}
+function convertToBahanUnit(jumlah, satuanInput, satuanBahan) {
+  if (!jumlah || satuanInput === satuanBahan) return jumlah;
+  if (satuanInput === 'gram' && satuanBahan === 'kg')    return jumlah / 1000;
+  if (satuanInput === 'ml'   && satuanBahan === 'liter') return jumlah / 1000;
+  return jumlah;
+}
+
 function resepRowHtml(r = {}) {
-  const opts = stateBahan.map(b => `<option value="${b.id}" data-satuan="${b.satuan}" ${r.bahan_id === b.id ? 'selected' : ''}>${b.nama} (${b.satuan})</option>`).join('');
+  const opts = stateBahan.map(b => `<option value="${b.id}" data-satuan="${b.satuan}" ${r.bahan_id === b.id ? 'selected' : ''}>${b.nama} (Rp ${Number(b.harga_per_satuan).toLocaleString('id-ID')}/${b.satuan})</option>`).join('');
   const bahan = stateBahan.find(b => b.id === r.bahan_id);
+  const bahanSatuan = bahan?.satuan || '';
+
+  // Default display unit: kalau bahan kg dan jumlah < 1, otomatis tampil gram
+  let displayUnit   = bahanSatuan;
+  let displayJumlah = r.jumlah || '';
+  if (r.jumlah && bahanSatuan === 'kg' && r.jumlah < 1) {
+    displayUnit = 'gram';
+    displayJumlah = Math.round(r.jumlah * 1000);
+  } else if (r.jumlah && bahanSatuan === 'liter' && r.jumlah < 1) {
+    displayUnit = 'ml';
+    displayJumlah = Math.round(r.jumlah * 1000);
+  }
+
+  const unitOpts = getResepUnitOptions(bahanSatuan).map(u =>
+    `<option value="${u}" ${u === displayUnit ? 'selected' : ''}>${u}</option>`
+  ).join('');
+
   return `<div class="resep-row" data-bahan-id="${r.bahan_id || ''}">
     <select class="resep-bahan"><option value="">— Pilih Bahan —</option>${opts}</select>
-    <input type="number" class="resep-jumlah" inputmode="decimal" step="0.001" min="0" value="${r.jumlah || ''}" placeholder="0" />
-    <span class="satuan-hint">${bahan?.satuan || ''}</span>
+    <input type="number" class="resep-jumlah" inputmode="decimal" step="any" min="0" value="${displayJumlah}" placeholder="contoh: 150" />
+    <select class="resep-satuan">${unitOpts}</select>
     <button class="row-delete" title="Hapus">🗑</button>
   </div>`;
 }
@@ -1296,12 +1343,17 @@ function wireResepRowEvents() {
     if (row.dataset.wired) return;
     row.dataset.wired = '1';
     const sel = $('.resep-bahan', row);
-    const hint = $('.satuan-hint', row);
+    const satuanSel = $('.resep-satuan', row);
+
+    // Saat bahan berubah → refresh dropdown satuan ikut bahannya
     sel.addEventListener('change', () => {
       const opt = sel.options[sel.selectedIndex];
-      hint.textContent = opt?.dataset.satuan || '';
+      const bahanSatuan = opt?.dataset.satuan || '';
+      const units = getResepUnitOptions(bahanSatuan);
+      satuanSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
       recalcResepTotal();
     });
+    satuanSel.addEventListener('change', recalcResepTotal);
     $('.resep-jumlah', row).addEventListener('input', recalcResepTotal);
     $('.row-delete', row).addEventListener('click', () => { row.remove(); recalcResepTotal(); });
   });
@@ -1310,10 +1362,15 @@ function wireResepRowEvents() {
 function recalcResepTotal() {
   let total = 0;
   $$('.resep-row').forEach(row => {
-    const bahanId = parseInt($('.resep-bahan', row).value);
-    const jumlah = parseNum($('.resep-jumlah', row).value);
-    const bahan = stateBahan.find(b => b.id === bahanId);
-    if (bahan && jumlah) total += jumlah * Number(bahan.harga_per_satuan);
+    const bahanId     = parseInt($('.resep-bahan', row).value);
+    const jumlah      = parseFloat($('.resep-jumlah', row).value) || 0;
+    const satuanInput = $('.resep-satuan', row)?.value || '';
+    const bahan       = stateBahan.find(b => b.id === bahanId);
+    if (bahan && jumlah) {
+      // Convert ke satuan bahan dulu (mis. 150 gram → 0.15 kg) sebelum dikalikan harga
+      const jumlahInBahanUnit = convertToBahanUnit(jumlah, satuanInput, bahan.satuan);
+      total += jumlahInBahanUnit * Number(bahan.harga_per_satuan);
+    }
   });
   $('#resepHppTotal').textContent = fmtRp(total);
 }
@@ -1330,10 +1387,14 @@ async function saveResepFor(menuId) {
   await supa.from('resep').delete().eq('menu_id', menuId);
   const newItems = [];
   $$('.resep-row').forEach(row => {
-    const bahanId = parseInt($('.resep-bahan', row).value);
-    const jumlah = parseNum($('.resep-jumlah', row).value);
-    if (bahanId && jumlah > 0) {
-      newItems.push({ menu_id: menuId, bahan_id: bahanId, jumlah });
+    const bahanId     = parseInt($('.resep-bahan', row).value);
+    const jumlah      = parseFloat($('.resep-jumlah', row).value) || 0;
+    const satuanInput = $('.resep-satuan', row)?.value || '';
+    const bahan       = stateBahan.find(b => b.id === bahanId);
+    if (bahanId && jumlah > 0 && bahan) {
+      // Convert ke satuan bahan (mis. 150 gram → 0.15 kg) sebelum simpan
+      const jumlahFinal = convertToBahanUnit(jumlah, satuanInput, bahan.satuan);
+      newItems.push({ menu_id: menuId, bahan_id: bahanId, jumlah: jumlahFinal });
     }
   });
   if (newItems.length > 0) {

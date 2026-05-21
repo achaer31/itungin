@@ -1178,10 +1178,20 @@ body.unauthenticated #view-login { display: flex; }
 }
 .resep-row {
   display: grid;
-  grid-template-columns: 2fr 1fr auto auto;
+  grid-template-columns: 2fr 1fr 90px auto;
   gap: 10px;
   margin-bottom: 8px;
   align-items: center;
+}
+.resep-row .resep-satuan {
+  padding: 10px 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--ember);
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ember);
+  text-align: center;
 }
 .resep-row select, .resep-row input {
   padding: 10px 12px;
