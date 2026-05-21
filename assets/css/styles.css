@@ -507,13 +507,15 @@ body.unauthenticated #view-login { display: flex; }
   align-items: center;
   gap: 12px;
   margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 .input-row label {
   flex: 1;
   font-size: 0.95rem;
   color: var(--cream);
+  min-width: 100px;
 }
-.input-row input {
+.input-row .mode-a-input {
   width: 160px;
   padding: 10px 12px;
   background: var(--bg-1);
@@ -524,10 +526,155 @@ body.unauthenticated #view-login { display: flex; }
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
-.input-row input:focus { outline: none; border-color: var(--ember); }
+.input-row .mode-a-input:focus { outline: none; border-color: var(--ember); }
 .input-row .rp-prefix {
   color: var(--cream-dim);
   font-size: 0.85rem;
+}
+.input-row .mode-a-catatan {
+  flex-basis: 100%;
+  margin-left: 0;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--cream-dim);
+}
+.input-row .mode-a-catatan:focus {
+  outline: none;
+  border-color: var(--ember);
+  border-style: solid;
+  color: var(--cream);
+}
+
+/* Detail Pengeluaran table */
+.detail-pengeluaran-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.detail-kategori-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.detail-kategori-box {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.detail-kategori-box .label {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  margin-bottom: 4px;
+}
+.detail-kategori-box .value {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+.detail-kategori-box .count {
+  font-size: 0.72rem;
+  color: var(--cream-dim);
+  margin-top: 2px;
+}
+
+.detail-filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.detail-filter-bar select {
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.detail-table th, .detail-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.detail-table th {
+  background: var(--bg-3);
+  color: var(--cream-dim);
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.detail-table td.nominal {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.detail-table td.tanggal {
+  color: var(--cream-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.detail-table td.kategori-cell {
+  white-space: nowrap;
+}
+.detail-table td.catatan-cell {
+  color: var(--cream-dim);
+  font-style: italic;
+  max-width: 360px;
+}
+.detail-table td.catatan-cell.empty { opacity: 0.4; }
+.detail-table td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.detail-table td.actions button {
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  color: var(--cream-dim);
+}
+.detail-table td.actions button:hover {
+  background: rgba(244, 234, 215, 0.06);
+  color: var(--cream);
+}
+.detail-table td.actions button.delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--red);
+}
+.detail-table tr.editing td { background: rgba(232, 115, 44, 0.06); }
+.detail-table input.edit-catatan {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--ember);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  color: var(--cream);
+}
+@media (max-width: 720px) {
+  .detail-table { font-size: 0.82rem; }
+  .detail-table th, .detail-table td { padding: 8px 6px; }
+  .detail-table td.catatan-cell { max-width: 200px; }
 }
 
 .input-totals {

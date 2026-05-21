@@ -562,10 +562,12 @@ function buildModeAInputs() {
   recalcModeATotal();
 }
 function modeARow(tipe, kategori) {
+  const isPengeluaran = tipe === 'pengeluaran';
   return `<div class="input-row">
     <label>${kategori}</label>
     <span class="rp-prefix">Rp</span>
     <input type="text" inputmode="numeric" class="mode-a-input number-input" data-tipe="${tipe}" data-kategori="${kategori}" placeholder="0" autocomplete="off" />
+    ${isPengeluaran ? `<input type="text" class="mode-a-catatan" data-tipe="${tipe}" data-kategori="${kategori}" placeholder="📝 Catatan (mis: beli 5kg ayam di pasar Bintaro)" autocomplete="off" />` : ''}
   </div>`;
 }
 function recalcModeATotal() {
@@ -588,9 +590,16 @@ async function saveModeA() {
   $$('.mode-a-input').forEach(inp => {
     const n = parseNum(inp.value);
     if (n > 0) {
+      const tipe = inp.dataset.tipe;
+      const kategori = inp.dataset.kategori;
+      // Cari catatan field yang match (cuma ada di pengeluaran)
+      const catatanInp = document.querySelector(`.mode-a-catatan[data-tipe="${tipe}"][data-kategori="${kategori}"]`);
+      const catatan = catatanInp?.value.trim() || null;
       rows.push({
-        tanggal, tipe: inp.dataset.tipe, kategori: inp.dataset.kategori,
-        nominal: n, dibuat_oleh: session.username
+        tanggal, tipe, kategori,
+        nominal: n,
+        catatan,
+        dibuat_oleh: session.username
       });
     }
   });
@@ -603,6 +612,7 @@ async function saveModeA() {
   if (error) { toast('Gagal simpan: ' + error.message, 'error'); return; }
   toast(`Tersimpan ${rows.length} entri untuk ${fmtDateShort(tanggal)}`, 'success');
   $$('.mode-a-input').forEach(inp => inp.value = '');
+  $$('.mode-a-catatan').forEach(inp => inp.value = '');
   recalcModeATotal();
   refreshTodayEntries();
 }
@@ -610,6 +620,7 @@ async function saveModeA() {
 function clearModeA() {
   if (!confirm('Reset semua input?')) return;
   $$('.mode-a-input').forEach(inp => inp.value = '');
+  $$('.mode-a-catatan').forEach(inp => inp.value = '');
   recalcModeATotal();
 }
 
@@ -756,11 +767,199 @@ async function saveBulk() {
 }
 
 /* ============ 9. REKAP ============ */
+let rekapTab = 'ringkasan';
+let detailKategoriFilter = ''; // '' = semua kategori pengeluaran
+
 async function loadRekap() {
   const monthInput = $('#rekapMonth');
   if (!monthInput.value) monthInput.value = currentYearMonth();
-  await renderRekap();
+  await renderRekapByTab();
 }
+
+function showRekapTab(tab) {
+  rekapTab = tab;
+  $$('#rekapTabs button').forEach(b => b.classList.toggle('active', b.dataset.rekapTab === tab));
+  renderRekapByTab();
+}
+
+async function renderRekapByTab() {
+  if (rekapTab === 'detail') {
+    await renderRekapDetail();
+  } else {
+    await renderRekap();
+  }
+}
+
+async function renderRekapDetail() {
+  const ym = $('#rekapMonth').value || currentYearMonth();
+  const range = monthRange(ym);
+  const el = $('#rekapContent');
+  el.innerHTML = '<div class="loading">Memuat data pengeluaran…</div>';
+
+  // Ambil semua transaksi pengeluaran di bulan ini
+  const { data, error } = await supa.from('transaksi')
+    .select('*')
+    .eq('tipe', 'pengeluaran')
+    .gte('tanggal', range.start)
+    .lte('tanggal', range.end)
+    .order('tanggal', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    el.innerHTML = '<div class="empty-state">Gagal load: ' + error.message + '</div>';
+    return;
+  }
+  const items = data || [];
+
+  // Breakdown per kategori
+  const byKategori = {};
+  let totalAll = 0;
+  items.forEach(t => {
+    const n = Number(t.nominal) || 0;
+    byKategori[t.kategori] = (byKategori[t.kategori] || { total: 0, count: 0 });
+    byKategori[t.kategori].total += n;
+    byKategori[t.kategori].count += 1;
+    totalAll += n;
+  });
+
+  const kategoriList = Object.entries(byKategori).sort((a,b) => b[1].total - a[1].total);
+
+  // Filter view
+  const filtered = detailKategoriFilter
+    ? items.filter(t => t.kategori === detailKategoriFilter)
+    : items;
+  const filteredTotal = filtered.reduce((s, t) => s + Number(t.nominal), 0);
+
+  const isAdmin = session.role === 'admin';
+
+  el.innerHTML = `
+    <div class="detail-pengeluaran-card">
+      <h3 style="font-family: var(--font-body); font-size: 0.82rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cream-dim); margin-bottom: 14px;">
+        Breakdown per Kategori (${fmtDateShort(range.start)} – ${fmtDateShort(range.end)})
+      </h3>
+      ${kategoriList.length === 0
+        ? '<div class="empty-state">Belum ada pengeluaran bulan ini.</div>'
+        : `<div class="detail-kategori-summary">
+            ${kategoriList.map(([kat, info]) => {
+              const pct = totalAll > 0 ? (info.total / totalAll * 100) : 0;
+              return `<div class="detail-kategori-box">
+                <div class="label">${kat}</div>
+                <div class="value">${fmtRp(info.total)}</div>
+                <div class="count">${info.count} entri · ${fmtPct(pct, 0)}</div>
+              </div>`;
+            }).join('')}
+            <div class="detail-kategori-box" style="border-color: var(--ember); background: rgba(232, 115, 44, 0.08);">
+              <div class="label">TOTAL BULAN INI</div>
+              <div class="value" style="color: var(--ember);">${fmtRp(totalAll)}</div>
+              <div class="count">${items.length} entri</div>
+            </div>
+          </div>`
+      }
+    </div>
+
+    <div class="detail-filter-bar">
+      <strong style="font-size: 0.85rem;">Filter Kategori:</strong>
+      <select id="detailKategoriFilter">
+        <option value="">Semua (${items.length})</option>
+        ${kategoriList.map(([kat, info]) => `<option value="${kat}" ${detailKategoriFilter === kat ? 'selected' : ''}>${kat} (${info.count})</option>`).join('')}
+      </select>
+      <span class="text-muted" style="font-size: 0.85rem;">Menampilkan ${filtered.length} entri · ${fmtRp(filteredTotal)}</span>
+    </div>
+
+    ${filtered.length === 0
+      ? '<div class="empty-state">Tidak ada entri.</div>'
+      : `<table class="detail-table">
+          <thead>
+            <tr>
+              <th>Tanggal</th>
+              <th>Kategori</th>
+              <th>Nominal</th>
+              <th>Catatan</th>
+              <th>Oleh</th>
+              ${isAdmin ? '<th></th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.map(t => `
+              <tr data-id="${t.id}">
+                <td class="tanggal">${fmtDateShort(t.tanggal)}</td>
+                <td class="kategori-cell"><span class="tipe-badge pengeluaran" style="display: inline-block; font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; background: rgba(245, 166, 35, 0.15); color: var(--amber);">${t.kategori}</span></td>
+                <td class="nominal">− ${fmtRp(t.nominal)}</td>
+                <td class="catatan-cell ${!t.catatan ? 'empty' : ''}" data-catatan-cell="${t.id}">${t.catatan ? escapeHtml(t.catatan) : '— tanpa catatan —'}</td>
+                <td style="color: var(--cream-dim); font-size: 0.82rem;">${t.dibuat_oleh || '—'}</td>
+                ${isAdmin ? `<td class="actions">
+                  <button class="edit-catatan-btn" data-edit-id="${t.id}" title="Edit catatan">✏️</button>
+                  <button class="delete delete-tx-btn" data-del-id="${t.id}" title="Hapus entri">🗑</button>
+                </td>` : ''}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`
+    }
+  `;
+
+  // Wire filter
+  $('#detailKategoriFilter')?.addEventListener('change', (e) => {
+    detailKategoriFilter = e.target.value;
+    renderRekapDetail();
+  });
+  // Wire edit catatan
+  $$('.edit-catatan-btn').forEach(b => b.addEventListener('click', () => editCatatanPengeluaran(parseInt(b.dataset.editId), items)));
+  // Wire delete
+  $$('.delete-tx-btn').forEach(b => b.addEventListener('click', () => deleteTransaksi(parseInt(b.dataset.delId))));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function editCatatanPengeluaran(id, items) {
+  const t = items.find(x => x.id === id);
+  if (!t) return;
+  const cell = $(`[data-catatan-cell="${id}"]`);
+  if (!cell) return;
+  const tr = cell.closest('tr');
+  tr.classList.add('editing');
+  const oldVal = t.catatan || '';
+  cell.innerHTML = `<input type="text" class="edit-catatan" value="${escapeHtml(oldVal)}" placeholder="Catatan…" />`;
+  const inp = cell.querySelector('input');
+  inp.focus();
+  inp.select();
+
+  const save = async () => {
+    const newVal = inp.value.trim() || null;
+    if (newVal === oldVal) {
+      tr.classList.remove('editing');
+      cell.innerHTML = oldVal ? escapeHtml(oldVal) : '— tanpa catatan —';
+      cell.classList.toggle('empty', !oldVal);
+      return;
+    }
+    const { error } = await supa.from('transaksi').update({ catatan: newVal }).eq('id', id);
+    if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+    toast('Catatan disimpan.', 'success');
+    renderRekapDetail();
+  };
+
+  inp.addEventListener('blur', save);
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') {
+      tr.classList.remove('editing');
+      cell.innerHTML = oldVal ? escapeHtml(oldVal) : '— tanpa catatan —';
+      cell.classList.toggle('empty', !oldVal);
+    }
+  });
+}
+
+async function deleteTransaksi(id) {
+  if (session.role !== 'admin') { toast('Hanya admin yang boleh hapus.', 'error'); return; }
+  if (!confirm('Hapus entri ini? Pemasukan/pengeluaran dari entri ini akan hilang dari laporan.')) return;
+  const { error } = await supa.from('transaksi').delete().eq('id', id);
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  toast('Entri dihapus.', 'success');
+  renderRekapDetail();
+}
+
 async function renderRekap() {
   const ym = $('#rekapMonth').value || currentYearMonth();
   const range = monthRange(ym);
@@ -2143,8 +2342,9 @@ function bindEvents() {
   $('#refreshBtn').addEventListener('click', loadDashboard);
 
   // Rekap
-  $('#rekapMonth').addEventListener('change', renderRekap);
+  $('#rekapMonth').addEventListener('change', renderRekapByTab);
   $('#exportCsvBtn').addEventListener('click', exportCsv);
+  $$('#rekapTabs button').forEach(b => b.addEventListener('click', () => showRekapTab(b.dataset.rekapTab)));
 
   // Pengaturan
   $('#saveSettingsBtn').addEventListener('click', savePengaturan);

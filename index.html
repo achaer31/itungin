@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/css/styles.css?v=20260521resep" />
+  <link rel="stylesheet" href="/assets/css/styles.css?v=20260521keluar" />
 
   <!-- Supabase JS SDK (UMD) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -269,6 +269,13 @@
           </div>
         </div>
 
+        <div class="view-toolbar">
+          <div class="mode-toggle" id="rekapTabs">
+            <button class="active" data-rekap-tab="ringkasan">📅 Ringkasan Harian</button>
+            <button data-rekap-tab="detail">💸 Detail Pengeluaran</button>
+          </div>
+        </div>
+
         <div id="rekapContent">
           <div class="loading">Memuat data…</div>
         </div>
@@ -517,7 +524,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- Scripts: config harus di-load duluan, lalu app.js -->
-  <script src="/assets/js/config.js?v=20260521resep"></script>
-  <script src="/assets/js/app.js?v=20260521resep"></script>
+  <script src="/assets/js/config.js?v=20260521keluar"></script>
+  <script src="/assets/js/app.js?v=20260521keluar"></script>
 </body>
 </html>
