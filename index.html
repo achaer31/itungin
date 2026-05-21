@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/css/styles.css?v=20260522belanja" />
+  <link rel="stylesheet" href="/assets/css/styles.css?v=20260522batch" />
 
   <!-- Supabase JS SDK (UMD) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -490,6 +490,7 @@
             <button class="active" data-hpp-tab="hitung">📊 Profit Menu</button>
             <button data-hpp-tab="menu">📋 Menu</button>
             <button data-hpp-tab="bahan">🥩 Bahan Baku</button>
+            <button data-hpp-tab="batch">🍯 Batch Resep</button>
             <button data-hpp-tab="resep">📝 Resep Menu</button>
           </div>
         </div>
@@ -558,6 +559,21 @@
               <tbody></tbody>
             </table>
           </div>
+        </div>
+
+        <!-- TAB: Batch Resep (sub-resep untuk bumbu kacang, sambal, kaldu) -->
+        <div id="hppBatch" class="hpp-tab-content" style="display: none;">
+          <div class="view-toolbar">
+            <strong style="font-size: 0.95rem;">Batch Resep (Sub-resep)</strong>
+            <select id="batchPicker" style="padding: 8px 12px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; min-width: 200px;">
+              <option value="">— Pilih Batch —</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" id="addBatchBtn">+ Tambah Batch Baru</button>
+          </div>
+          <div class="bulk-help">
+            💡 Batch buat hal kayak <strong>bumbu kacang</strong> (1 batch jadi 100 porsi), <strong>sambal kecap</strong>, atau <strong>kaldu sop</strong>. Hitung total batch sekali → cost per porsi auto. Lalu di Resep Menu, tinggal pilih "Bumbu Kacang × 1 porsi".
+          </div>
+          <div id="batchEditor"><div class="empty-state">Pilih batch di dropdown atau klik "+ Tambah Batch Baru".</div></div>
         </div>
 
         <!-- TAB: Resep Menu -->
@@ -659,7 +675,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- Scripts: config harus di-load duluan, lalu app.js -->
-  <script src="/assets/js/config.js?v=20260522belanja"></script>
-  <script src="/assets/js/app.js?v=20260522belanja"></script>
+  <script src="/assets/js/config.js?v=20260522batch"></script>
+  <script src="/assets/js/app.js?v=20260522batch"></script>
 </body>
 </html>

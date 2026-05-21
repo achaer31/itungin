@@ -30,6 +30,8 @@ let session = null;           // { username, role }
 let stateBahan = [];
 let stateMenu = [];
 let stateResep = [];          // all rows
+let stateBatchResep = [];     // sub-resep (bumbu kacang, sambal, kaldu)
+let stateBatchKomp = [];      // komponen per batch
 let statePengaturan = null;
 let cart = [];                // POS cart: [{menu_id, nama, harga, hpp, qty, catatan}]
 let posChannel = 'Dine-in';
@@ -304,6 +306,18 @@ async function fetchResep() {
   if (error) { console.error(error); return []; }
   stateResep = data || [];
   return stateResep;
+}
+async function fetchBatchResep() {
+  const { data, error } = await supa.from('batch_resep').select('*').order('nama');
+  if (error) { console.error(error); return []; }
+  stateBatchResep = data || [];
+  return stateBatchResep;
+}
+async function fetchBatchKomp() {
+  const { data, error } = await supa.from('batch_resep_komponen').select('*');
+  if (error) { console.error(error); return []; }
+  stateBatchKomp = data || [];
+  return stateBatchKomp;
 }
 async function fetchPesanan(dateFrom, dateTo) {
   let q = supa.from('pesanan').select('*').eq('status', 'selesai').order('waktu', { ascending: false });
@@ -1304,7 +1318,7 @@ async function savePengaturan() {
 let hppTab = 'hitung';
 
 async function loadHpp() {
-  await Promise.all([fetchBahan(), fetchMenu(), fetchResep(), fetchPengaturan()]);
+  await Promise.all([fetchBahan(), fetchMenu(), fetchResep(), fetchBatchResep(), fetchBatchKomp(), fetchPengaturan()]);
   showHppTab(hppTab);
 }
 function showHppTab(tab) {
@@ -1313,22 +1327,49 @@ function showHppTab(tab) {
   $('#hppHitung').style.display = tab === 'hitung' ? '' : 'none';
   $('#hppMenu').style.display   = tab === 'menu'   ? '' : 'none';
   $('#hppBahan').style.display  = tab === 'bahan'  ? '' : 'none';
+  $('#hppBatch').style.display  = tab === 'batch'  ? '' : 'none';
   $('#hppResep').style.display  = tab === 'resep'  ? '' : 'none';
   if (tab === 'hitung') renderHppTable();
   if (tab === 'menu')   renderMenuTable();
   if (tab === 'bahan')  renderBahanTable();
+  if (tab === 'batch')  renderBatchPicker();
   if (tab === 'resep')  renderResepPicker();
+}
+
+// Total cost batch (semua komponen), bukan per porsi
+function computeBatchTotalCost(batchId, kompList = stateBatchKomp, bahanList = stateBahan) {
+  const items = kompList.filter(k => k.batch_id === batchId);
+  let total = 0;
+  items.forEach(k => {
+    const b = bahanList.find(x => x.id === k.bahan_id);
+    if (!b) return;
+    const harga = Number(b.harga_rata_rata) || Number(b.harga_per_satuan) || 0;
+    total += Number(k.jumlah) * harga;
+  });
+  return total;
+}
+// Cost per porsi dari batch (dipakai di resep menu)
+function computeBatchCostPerPorsi(batchId, batchList = stateBatchResep, kompList = stateBatchKomp, bahanList = stateBahan) {
+  const batch = batchList.find(b => b.id === batchId);
+  if (!batch || !batch.porsi_dihasilkan) return 0;
+  const totalCost = computeBatchTotalCost(batchId, kompList, bahanList);
+  return totalCost / Number(batch.porsi_dihasilkan);
 }
 
 function computeHpp(menuId, resepList = stateResep, bahanList = stateBahan) {
   const items = resepList.filter(r => r.menu_id === menuId);
   let total = 0;
   items.forEach(r => {
-    const b = bahanList.find(x => x.id === r.bahan_id);
-    if (!b) return;
-    // Pakai harga rata-rata (moving average dari Belanja) — fallback ke harga_per_satuan
-    const harga = Number(b.harga_rata_rata) || Number(b.harga_per_satuan) || 0;
-    total += Number(r.jumlah) * harga;
+    if (r.batch_resep_id) {
+      // Komponen dari batch sub-resep
+      const costPerPorsi = computeBatchCostPerPorsi(r.batch_resep_id);
+      total += Number(r.jumlah) * costPerPorsi;
+    } else if (r.bahan_id) {
+      const b = bahanList.find(x => x.id === r.bahan_id);
+      if (!b) return;
+      const harga = Number(b.harga_rata_rata) || Number(b.harga_per_satuan) || 0;
+      total += Number(r.jumlah) * harga;
+    }
   });
   return total;
 }
@@ -1914,6 +1955,216 @@ function openFotoModal(menuId) {
   });
 }
 
+/* ===== BATCH RESEP ===== */
+let activeBatchId = null;
+
+function renderBatchPicker() {
+  const sel = $('#batchPicker');
+  sel.innerHTML = '<option value="">— Pilih Batch —</option>' +
+    stateBatchResep.map(b => {
+      const totalCost = computeBatchTotalCost(b.id);
+      const perPorsi = b.porsi_dihasilkan > 0 ? totalCost / b.porsi_dihasilkan : 0;
+      return `<option value="${b.id}">${escapeHtml(b.nama)} · ${b.porsi_dihasilkan} porsi · ${fmtRp(perPorsi)}/porsi</option>`;
+    }).join('');
+  sel.onchange = () => {
+    activeBatchId = parseInt(sel.value) || null;
+    renderBatchEditor();
+  };
+  $('#addBatchBtn').onclick = addBatchBaru;
+  if (activeBatchId) {
+    sel.value = activeBatchId;
+    renderBatchEditor();
+  } else {
+    $('#batchEditor').innerHTML = '<div class="empty-state">Pilih batch di dropdown atau klik "+ Tambah Batch Baru".</div>';
+  }
+}
+
+async function addBatchBaru() {
+  const nama = prompt('Nama batch (mis. "Bumbu Kacang", "Sambal Kecap", "Kaldu Sop"):');
+  if (!nama || !nama.trim()) return;
+  const { data, error } = await supa.from('batch_resep').insert({
+    nama: nama.trim(),
+    porsi_dihasilkan: 1
+  }).select().single();
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  stateBatchResep.push(data);
+  activeBatchId = data.id;
+  renderBatchPicker();
+  toast(`Batch "${data.nama}" dibuat. Tambah komponen di bawah.`, 'success');
+}
+
+function renderBatchEditor() {
+  if (!activeBatchId) return;
+  const batch = stateBatchResep.find(b => b.id === activeBatchId);
+  if (!batch) return;
+  const komp = stateBatchKomp.filter(k => k.batch_id === activeBatchId);
+  const totalCost = computeBatchTotalCost(activeBatchId);
+  const perPorsi = batch.porsi_dihasilkan > 0 ? totalCost / batch.porsi_dihasilkan : 0;
+
+  $('#batchEditor').innerHTML = `
+    <div class="resep-editor-card">
+      <div class="menu-header">
+        <div style="flex: 1;">
+          <input type="text" id="batchNama" value="${escapeHtml(batch.nama)}" style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 600; background: transparent; border: none; color: var(--cream); padding: 4px 0; border-bottom: 1px dashed var(--line); width: 100%;" />
+          <div style="margin-top: 8px; display: flex; gap: 16px; align-items: center; font-size: 0.9rem;">
+            <label style="color: var(--cream-dim);">Porsi dihasilkan:</label>
+            <input type="number" id="batchPorsi" inputmode="decimal" step="any" min="0.01" value="${batch.porsi_dihasilkan}" style="width: 100px; padding: 6px 10px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 6px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums;" />
+            <span style="color: var(--cream-dim);">porsi per batch</span>
+          </div>
+        </div>
+      </div>
+      <h4 style="font-family: var(--font-body); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--cream-dim); margin: 16px 0 10px;">Komponen Bahan</h4>
+      <div id="batchKompItems">
+        ${komp.map(k => batchKompRowHtml(k)).join('') || '<div class="text-muted" style="padding: 12px 0;">Belum ada komponen. Klik "+ Tambah Komponen".</div>'}
+      </div>
+      <div style="margin-top: 10px;">
+        <button class="btn btn-ghost btn-sm" id="addBatchKompBtn">+ Tambah Komponen</button>
+      </div>
+      <div class="resep-total" style="margin-top: 18px;">
+        <div>
+          <div style="color: var(--cream-dim); font-size: 0.85rem;">Total Cost Batch</div>
+          <div class="hpp-value" id="batchTotalCost" style="font-size: 1.1rem;">${fmtRp(totalCost)}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="color: var(--cream-dim); font-size: 0.85rem;">Cost per Porsi</div>
+          <div class="hpp-value" id="batchPerPorsi">${fmtRp(perPorsi)}</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px; margin-top: 16px;">
+        <button class="btn btn-primary" id="saveBatchBtn">💾 Simpan Batch</button>
+        <button class="btn btn-ghost" id="deleteBatchBtn" style="color: var(--red);">🗑 Hapus Batch</button>
+        <span class="text-muted" id="batchStatus" style="font-size: 0.85rem; align-self: center;"></span>
+      </div>
+    </div>`;
+
+  $('#addBatchKompBtn').onclick = () => addBatchKompRow();
+  $('#saveBatchBtn').onclick = () => saveBatchEditor(activeBatchId);
+  $('#deleteBatchBtn').onclick = () => deleteBatchResep(activeBatchId);
+  $('#batchPorsi').addEventListener('input', recalcBatchTotal);
+  wireBatchKompRows();
+}
+
+function batchKompRowHtml(k = {}) {
+  const opts = stateBahan.map(b => `<option value="${b.id}" data-satuan="${b.satuan}" ${k.bahan_id === b.id ? 'selected' : ''}>${escapeHtml(b.nama)} (Rp ${fmtNumber(b.harga_rata_rata || b.harga_per_satuan)}/${b.satuan})</option>`).join('');
+  const bahan = stateBahan.find(b => b.id === k.bahan_id);
+  const bahanSatuan = bahan?.satuan || '';
+  // Display unit logic (sama kayak resep menu)
+  let displayUnit = bahanSatuan;
+  let displayJumlah = k.jumlah || '';
+  if (k.jumlah && bahanSatuan === 'kg' && k.jumlah < 1) {
+    displayUnit = 'gram'; displayJumlah = Math.round(k.jumlah * 1000);
+  } else if (k.jumlah && bahanSatuan === 'liter' && k.jumlah < 1) {
+    displayUnit = 'ml'; displayJumlah = Math.round(k.jumlah * 1000);
+  }
+  const unitOpts = getResepUnitOptions(bahanSatuan).map(u =>
+    `<option value="${u}" ${u === displayUnit ? 'selected' : ''}>${u}</option>`
+  ).join('');
+  return `<div class="resep-row batch-komp-row">
+    <select class="batch-komp-bahan"><option value="">— Pilih Bahan —</option>${opts}</select>
+    <input type="number" class="batch-komp-jumlah" inputmode="decimal" step="any" min="0" value="${displayJumlah}" placeholder="contoh: 5" />
+    <select class="batch-komp-satuan">${unitOpts}</select>
+    <button class="row-delete" title="Hapus">🗑</button>
+  </div>`;
+}
+
+function addBatchKompRow() {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = batchKompRowHtml();
+  $('#batchKompItems').appendChild(wrap.firstElementChild);
+  wireBatchKompRows();
+}
+
+function wireBatchKompRows() {
+  $$('.batch-komp-row').forEach(row => {
+    if (row.dataset.wired) return;
+    row.dataset.wired = '1';
+    const sel = $('.batch-komp-bahan', row);
+    const satuanSel = $('.batch-komp-satuan', row);
+    sel.addEventListener('change', () => {
+      const opt = sel.options[sel.selectedIndex];
+      const bahanSatuan = opt?.dataset.satuan || '';
+      const units = getResepUnitOptions(bahanSatuan);
+      satuanSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
+      recalcBatchTotal();
+    });
+    satuanSel.addEventListener('change', recalcBatchTotal);
+    $('.batch-komp-jumlah', row).addEventListener('input', recalcBatchTotal);
+    $('.row-delete', row).addEventListener('click', () => { row.remove(); recalcBatchTotal(); });
+  });
+}
+
+function recalcBatchTotal() {
+  let total = 0;
+  $$('.batch-komp-row').forEach(row => {
+    const bahanId = parseInt($('.batch-komp-bahan', row).value);
+    const jumlah = parseFloat($('.batch-komp-jumlah', row).value) || 0;
+    const satuanInput = $('.batch-komp-satuan', row)?.value || '';
+    const bahan = stateBahan.find(b => b.id === bahanId);
+    if (bahan && jumlah) {
+      const jumlahInBahanUnit = convertToBahanUnit(jumlah, satuanInput, bahan.satuan);
+      const harga = Number(bahan.harga_rata_rata) || Number(bahan.harga_per_satuan) || 0;
+      total += jumlahInBahanUnit * harga;
+    }
+  });
+  $('#batchTotalCost').textContent = fmtRp(total);
+  const porsi = parseFloat($('#batchPorsi').value) || 1;
+  $('#batchPerPorsi').textContent = fmtRp(porsi > 0 ? total / porsi : 0);
+}
+
+async function saveBatchEditor(batchId) {
+  const btn = $('#saveBatchBtn');
+  btn.disabled = true; btn.textContent = 'Menyimpan…';
+
+  // Update header (nama + porsi_dihasilkan)
+  const nama = $('#batchNama').value.trim();
+  const porsi = parseFloat($('#batchPorsi').value) || 1;
+  if (!nama) { btn.disabled = false; btn.textContent = '💾 Simpan Batch'; toast('Nama batch wajib diisi', 'error'); return; }
+  await supa.from('batch_resep').update({ nama, porsi_dihasilkan: porsi }).eq('id', batchId);
+
+  // Replace komponen
+  await supa.from('batch_resep_komponen').delete().eq('batch_id', batchId);
+  const newKomp = [];
+  $$('.batch-komp-row').forEach(row => {
+    const bahanId = parseInt($('.batch-komp-bahan', row).value);
+    const jumlah = parseFloat($('.batch-komp-jumlah', row).value) || 0;
+    const satuanInput = $('.batch-komp-satuan', row)?.value || '';
+    const bahan = stateBahan.find(b => b.id === bahanId);
+    if (bahanId && jumlah > 0 && bahan) {
+      const jumlahFinal = convertToBahanUnit(jumlah, satuanInput, bahan.satuan);
+      newKomp.push({ batch_id: batchId, bahan_id: bahanId, jumlah: jumlahFinal });
+    }
+  });
+  if (newKomp.length > 0) {
+    await supa.from('batch_resep_komponen').insert(newKomp);
+  }
+
+  btn.disabled = false; btn.textContent = '💾 Simpan Batch';
+  await fetchBatchResep();
+  await fetchBatchKomp();
+  $('#batchStatus').textContent = '✓ Tersimpan';
+  setTimeout(() => $('#batchStatus').textContent = '', 2000);
+  toast('Batch tersimpan. HPP menu yang pakai batch ini auto-update.', 'success');
+  renderBatchPicker();
+}
+
+async function deleteBatchResep(batchId) {
+  const batch = stateBatchResep.find(b => b.id === batchId);
+  // Cek apakah ada menu yang pakai batch ini
+  const menusUse = stateResep.filter(r => r.batch_resep_id === batchId);
+  let msg = `Hapus batch "${batch.nama}"?`;
+  if (menusUse.length > 0) {
+    msg += `\n\n⚠️ Batch ini dipakai di ${menusUse.length} resep menu. Komponen batch akan ikut hilang dari resep.`;
+  }
+  if (!confirm(msg)) return;
+  await supa.from('batch_resep').delete().eq('id', batchId);
+  stateBatchResep = stateBatchResep.filter(b => b.id !== batchId);
+  await fetchResep();
+  activeBatchId = null;
+  renderBatchPicker();
+  toast('Batch dihapus.');
+}
+/* ===== END BATCH RESEP ===== */
+
 function renderResepPicker() {
   const sel = $('#resepMenuPicker');
   sel.innerHTML = '<option value="">— Pilih Menu —</option>' +
@@ -1979,17 +2230,30 @@ function convertToBahanUnit(jumlah, satuanInput, satuanBahan) {
 }
 
 function resepRowHtml(r = {}) {
-  const opts = stateBahan.map(b => `<option value="${b.id}" data-satuan="${b.satuan}" ${r.bahan_id === b.id ? 'selected' : ''}>${b.nama} (Rp ${Number(b.harga_per_satuan).toLocaleString('id-ID')}/${b.satuan})</option>`).join('');
-  const bahan = stateBahan.find(b => b.id === r.bahan_id);
-  const bahanSatuan = bahan?.satuan || '';
+  // Dropdown sekarang punya 2 optgroup: bahan langsung + batch sub-resep
+  // Value pakai prefix 'bahan:ID' atau 'batch:ID' biar gampang parse
+  const bahanOpts = stateBahan.map(b => {
+    const harga = Number(b.harga_rata_rata) || Number(b.harga_per_satuan) || 0;
+    const sel = r.bahan_id === b.id ? 'selected' : '';
+    return `<option value="bahan:${b.id}" data-satuan="${b.satuan}" data-type="bahan" ${sel}>${escapeHtml(b.nama)} (Rp ${fmtNumber(harga)}/${b.satuan})</option>`;
+  }).join('');
+  const batchOpts = stateBatchResep.map(b => {
+    const perPorsi = computeBatchCostPerPorsi(b.id);
+    const sel = r.batch_resep_id === b.id ? 'selected' : '';
+    return `<option value="batch:${b.id}" data-satuan="porsi" data-type="batch" ${sel}>${escapeHtml(b.nama)} (Rp ${fmtNumber(perPorsi)}/porsi)</option>`;
+  }).join('');
 
-  // Default display unit: kalau bahan kg dan jumlah < 1, otomatis tampil gram
+  const isBatch = !!r.batch_resep_id;
+  const refBahan = stateBahan.find(b => b.id === r.bahan_id);
+  const bahanSatuan = isBatch ? 'porsi' : (refBahan?.satuan || '');
+
+  // Default display unit
   let displayUnit   = bahanSatuan;
   let displayJumlah = r.jumlah || '';
-  if (r.jumlah && bahanSatuan === 'kg' && r.jumlah < 1) {
+  if (!isBatch && r.jumlah && bahanSatuan === 'kg' && r.jumlah < 1) {
     displayUnit = 'gram';
     displayJumlah = Math.round(r.jumlah * 1000);
-  } else if (r.jumlah && bahanSatuan === 'liter' && r.jumlah < 1) {
+  } else if (!isBatch && r.jumlah && bahanSatuan === 'liter' && r.jumlah < 1) {
     displayUnit = 'ml';
     displayJumlah = Math.round(r.jumlah * 1000);
   }
@@ -1998,8 +2262,12 @@ function resepRowHtml(r = {}) {
     `<option value="${u}" ${u === displayUnit ? 'selected' : ''}>${u}</option>`
   ).join('');
 
-  return `<div class="resep-row" data-bahan-id="${r.bahan_id || ''}">
-    <select class="resep-bahan"><option value="">— Pilih Bahan —</option>${opts}</select>
+  return `<div class="resep-row">
+    <select class="resep-bahan">
+      <option value="">— Pilih Bahan / Batch —</option>
+      ${bahanOpts ? `<optgroup label="🟠 Bahan Langsung">${bahanOpts}</optgroup>` : ''}
+      ${batchOpts ? `<optgroup label="🔵 Batch (Sub-resep)">${batchOpts}</optgroup>` : ''}
+    </select>
     <input type="number" class="resep-jumlah" inputmode="decimal" step="any" min="0" value="${displayJumlah}" placeholder="contoh: 150" />
     <select class="resep-satuan">${unitOpts}</select>
     <button class="row-delete" title="Hapus">🗑</button>
@@ -2020,12 +2288,14 @@ function wireResepRowEvents() {
     const sel = $('.resep-bahan', row);
     const satuanSel = $('.resep-satuan', row);
 
-    // Saat bahan berubah → refresh dropdown satuan ikut bahannya
     sel.addEventListener('change', () => {
       const opt = sel.options[sel.selectedIndex];
       const bahanSatuan = opt?.dataset.satuan || '';
-      const units = getResepUnitOptions(bahanSatuan);
+      const isBatch = opt?.dataset.type === 'batch';
+      // Kalau batch → satuan locked ke 'porsi'
+      const units = isBatch ? ['porsi'] : getResepUnitOptions(bahanSatuan);
       satuanSel.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join('');
+      satuanSel.disabled = isBatch;
       recalcResepTotal();
     });
     satuanSel.addEventListener('change', recalcResepTotal);
@@ -2034,17 +2304,31 @@ function wireResepRowEvents() {
   });
 }
 
+// Parse value 'bahan:ID' atau 'batch:ID' jadi { type, id }
+function parseResepRef(value) {
+  if (!value) return { type: null, id: null };
+  const [type, idStr] = value.split(':');
+  return { type, id: parseInt(idStr) };
+}
+
 function recalcResepTotal() {
   let total = 0;
   $$('.resep-row').forEach(row => {
-    const bahanId     = parseInt($('.resep-bahan', row).value);
+    const ref         = parseResepRef($('.resep-bahan', row).value);
     const jumlah      = parseFloat($('.resep-jumlah', row).value) || 0;
     const satuanInput = $('.resep-satuan', row)?.value || '';
-    const bahan       = stateBahan.find(b => b.id === bahanId);
-    if (bahan && jumlah) {
-      // Convert ke satuan bahan dulu (mis. 150 gram → 0.15 kg) sebelum dikalikan harga
+    if (!jumlah || !ref.id) return;
+
+    if (ref.type === 'batch') {
+      // Batch sub-resep — cost per porsi × jumlah porsi
+      const costPerPorsi = computeBatchCostPerPorsi(ref.id);
+      total += jumlah * costPerPorsi;
+    } else if (ref.type === 'bahan') {
+      const bahan = stateBahan.find(b => b.id === ref.id);
+      if (!bahan) return;
       const jumlahInBahanUnit = convertToBahanUnit(jumlah, satuanInput, bahan.satuan);
-      total += jumlahInBahanUnit * Number(bahan.harga_per_satuan);
+      const harga = Number(bahan.harga_rata_rata) || Number(bahan.harga_per_satuan) || 0;
+      total += jumlahInBahanUnit * harga;
     }
   });
   $('#resepHppTotal').textContent = fmtRp(total);
@@ -2062,14 +2346,19 @@ async function saveResepFor(menuId) {
   await supa.from('resep').delete().eq('menu_id', menuId);
   const newItems = [];
   $$('.resep-row').forEach(row => {
-    const bahanId     = parseInt($('.resep-bahan', row).value);
+    const ref         = parseResepRef($('.resep-bahan', row).value);
     const jumlah      = parseFloat($('.resep-jumlah', row).value) || 0;
     const satuanInput = $('.resep-satuan', row)?.value || '';
-    const bahan       = stateBahan.find(b => b.id === bahanId);
-    if (bahanId && jumlah > 0 && bahan) {
-      // Convert ke satuan bahan (mis. 150 gram → 0.15 kg) sebelum simpan
+    if (!jumlah || jumlah <= 0 || !ref.id) return;
+
+    if (ref.type === 'batch') {
+      // Jumlah disimpan as-is (porsi count)
+      newItems.push({ menu_id: menuId, batch_resep_id: ref.id, jumlah });
+    } else if (ref.type === 'bahan') {
+      const bahan = stateBahan.find(b => b.id === ref.id);
+      if (!bahan) return;
       const jumlahFinal = convertToBahanUnit(jumlah, satuanInput, bahan.satuan);
-      newItems.push({ menu_id: menuId, bahan_id: bahanId, jumlah: jumlahFinal });
+      newItems.push({ menu_id: menuId, bahan_id: ref.id, jumlah: jumlahFinal });
     }
   });
   if (newItems.length > 0) {

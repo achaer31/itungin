@@ -187,18 +187,63 @@ CREATE TRIGGER trg_menu_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- ================================================================
--- TABLE: resep (komposisi bahan per menu)
+-- TABLE: batch_resep (sub-resep batch: bumbu kacang, sambal, kaldu sop)
+-- Komponen disusun dari bahan biasa. Cost per porsi auto-dihitung
+-- dari total batch ÷ porsi_dihasilkan.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS public.batch_resep (
+  id                BIGSERIAL PRIMARY KEY,
+  nama              TEXT NOT NULL,
+  porsi_dihasilkan  NUMERIC(15, 4) NOT NULL DEFAULT 1 CHECK (porsi_dihasilkan > 0),
+  catatan           TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_resep_nama ON public.batch_resep (LOWER(nama));
+
+DROP TRIGGER IF EXISTS trg_batch_resep_updated_at ON public.batch_resep;
+CREATE TRIGGER trg_batch_resep_updated_at
+  BEFORE UPDATE ON public.batch_resep
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TABLE IF NOT EXISTS public.batch_resep_komponen (
+  id          BIGSERIAL PRIMARY KEY,
+  batch_id    BIGINT NOT NULL REFERENCES public.batch_resep(id) ON DELETE CASCADE,
+  bahan_id    BIGINT NOT NULL REFERENCES public.bahan(id) ON DELETE RESTRICT,
+  jumlah      NUMERIC(15, 4) NOT NULL DEFAULT 0,
+  catatan     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (batch_id, bahan_id)
+);
+CREATE INDEX IF NOT EXISTS idx_batch_komp_batch ON public.batch_resep_komponen (batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_komp_bahan ON public.batch_resep_komponen (bahan_id);
+
+-- ================================================================
+-- TABLE: resep (komposisi bahan per menu) — extended dengan batch_resep_id
+-- bahan_id ATAU batch_resep_id (salah satu), jadi nullable
 -- ================================================================
 CREATE TABLE IF NOT EXISTS public.resep (
-  id         BIGSERIAL PRIMARY KEY,
-  menu_id    BIGINT NOT NULL REFERENCES public.menu(id) ON DELETE CASCADE,
-  bahan_id   BIGINT NOT NULL REFERENCES public.bahan(id) ON DELETE RESTRICT,
-  jumlah     NUMERIC(15, 4) NOT NULL DEFAULT 0,
-  catatan    TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (menu_id, bahan_id)
+  id              BIGSERIAL PRIMARY KEY,
+  menu_id         BIGINT NOT NULL REFERENCES public.menu(id) ON DELETE CASCADE,
+  bahan_id        BIGINT REFERENCES public.bahan(id) ON DELETE RESTRICT,
+  batch_resep_id  BIGINT REFERENCES public.batch_resep(id) ON DELETE CASCADE,
+  jumlah          NUMERIC(15, 4) NOT NULL DEFAULT 0,
+  catatan         TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (bahan_id IS NOT NULL OR batch_resep_id IS NOT NULL)
 );
+
+-- Migration kalau tabel sudah ada
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema='public' AND table_name='resep' AND column_name='batch_resep_id') THEN
+    ALTER TABLE public.resep ADD COLUMN batch_resep_id BIGINT REFERENCES public.batch_resep(id) ON DELETE CASCADE;
+    ALTER TABLE public.resep ALTER COLUMN bahan_id DROP NOT NULL;
+    ALTER TABLE public.resep DROP CONSTRAINT IF EXISTS resep_menu_id_bahan_id_key;
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_resep_menu  ON public.resep (menu_id);
 CREATE INDEX IF NOT EXISTS idx_resep_bahan ON public.resep (bahan_id);
 
@@ -299,35 +344,41 @@ CREATE TRIGGER trg_pembayaran_updated_at
 -- ================================================================
 -- ROW LEVEL SECURITY
 -- ================================================================
-ALTER TABLE public.outlet       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.transaksi    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pengaturan   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bahan        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.menu         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.resep        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pesanan      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pesanan_item ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pembayaran   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.outlet               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transaksi            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pengaturan           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bahan                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.menu                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.resep                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.batch_resep          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.batch_resep_komponen ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pesanan              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pesanan_item         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pembayaran           ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "anon_all_outlet"       ON public.outlet;
-DROP POLICY IF EXISTS "anon_all_transaksi"    ON public.transaksi;
-DROP POLICY IF EXISTS "anon_all_pengaturan"   ON public.pengaturan;
-DROP POLICY IF EXISTS "anon_all_bahan"        ON public.bahan;
-DROP POLICY IF EXISTS "anon_all_menu"         ON public.menu;
-DROP POLICY IF EXISTS "anon_all_resep"        ON public.resep;
-DROP POLICY IF EXISTS "anon_all_pesanan"      ON public.pesanan;
-DROP POLICY IF EXISTS "anon_all_pesanan_item" ON public.pesanan_item;
-DROP POLICY IF EXISTS "anon_all_pembayaran"   ON public.pembayaran;
+DROP POLICY IF EXISTS "anon_all_outlet"               ON public.outlet;
+DROP POLICY IF EXISTS "anon_all_transaksi"            ON public.transaksi;
+DROP POLICY IF EXISTS "anon_all_pengaturan"           ON public.pengaturan;
+DROP POLICY IF EXISTS "anon_all_bahan"                ON public.bahan;
+DROP POLICY IF EXISTS "anon_all_menu"                 ON public.menu;
+DROP POLICY IF EXISTS "anon_all_resep"                ON public.resep;
+DROP POLICY IF EXISTS "anon_all_batch_resep"          ON public.batch_resep;
+DROP POLICY IF EXISTS "anon_all_batch_resep_komponen" ON public.batch_resep_komponen;
+DROP POLICY IF EXISTS "anon_all_pesanan"              ON public.pesanan;
+DROP POLICY IF EXISTS "anon_all_pesanan_item"         ON public.pesanan_item;
+DROP POLICY IF EXISTS "anon_all_pembayaran"           ON public.pembayaran;
 
-CREATE POLICY "anon_all_outlet"       ON public.outlet       FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_transaksi"    ON public.transaksi    FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_pengaturan"   ON public.pengaturan   FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_bahan"        ON public.bahan        FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_menu"         ON public.menu         FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_resep"        ON public.resep        FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_pesanan"      ON public.pesanan      FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_pesanan_item" ON public.pesanan_item FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "anon_all_pembayaran"   ON public.pembayaran   FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_outlet"               ON public.outlet               FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_transaksi"            ON public.transaksi            FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_pengaturan"           ON public.pengaturan           FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_bahan"                ON public.bahan                FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_menu"                 ON public.menu                 FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_resep"                ON public.resep                FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_batch_resep"          ON public.batch_resep          FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_batch_resep_komponen" ON public.batch_resep_komponen FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_pesanan"              ON public.pesanan              FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_pesanan_item"         ON public.pesanan_item         FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "anon_all_pembayaran"           ON public.pembayaran           FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ================================================================
 -- TABLE: pengeluaran_tetap (beban bulanan recurring: sewa, gaji, listrik, dll)
