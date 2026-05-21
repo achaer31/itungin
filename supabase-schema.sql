@@ -298,6 +298,33 @@ CREATE POLICY "anon_all_pesanan_item" ON public.pesanan_item FOR ALL TO anon USI
 CREATE POLICY "anon_all_pembayaran"   ON public.pembayaran   FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ================================================================
+-- TABLE: pengeluaran_tetap (beban bulanan recurring: sewa, gaji, listrik, dll)
+-- Setup sekali → sistem ingatkan tiap bulan saat sudah lewat tanggal bayar
+-- ================================================================
+CREATE TABLE IF NOT EXISTS public.pengeluaran_tetap (
+  id                   BIGSERIAL PRIMARY KEY,
+  nama                 TEXT NOT NULL,
+  kategori             TEXT NOT NULL,
+  nominal              NUMERIC(15, 2) NOT NULL DEFAULT 0,
+  tanggal_bayar        INT NOT NULL DEFAULT 1 CHECK (tanggal_bayar BETWEEN 1 AND 31),
+  catatan              TEXT,
+  aktif                BOOLEAN NOT NULL DEFAULT TRUE,
+  last_recorded_month  TEXT,  -- format 'YYYY-MM' (mis. '2026-05')
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pengeluaran_tetap_aktif ON public.pengeluaran_tetap (aktif);
+
+DROP TRIGGER IF EXISTS trg_pengeluaran_tetap_updated_at ON public.pengeluaran_tetap;
+CREATE TRIGGER trg_pengeluaran_tetap_updated_at
+  BEFORE UPDATE ON public.pengeluaran_tetap
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.pengeluaran_tetap ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "anon_all_pengeluaran_tetap" ON public.pengeluaran_tetap;
+CREATE POLICY "anon_all_pengeluaran_tetap" ON public.pengeluaran_tetap FOR ALL TO anon USING (true) WITH CHECK (true);
+
+-- ================================================================
 -- STORAGE BUCKET: menu-photos (untuk upload foto menu langsung dari app)
 -- ================================================================
 INSERT INTO storage.buckets (id, name, public)

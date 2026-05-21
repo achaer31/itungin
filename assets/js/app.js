@@ -326,11 +326,15 @@ async function loadDashboard() {
   const range = monthRange(ym);
 
   // Parallel fetch
-  const [pengaturan, txMonth, pesananMonth] = await Promise.all([
+  const [pengaturan, txMonth, pesananMonth, _beban] = await Promise.all([
     fetchPengaturan(),
     fetchTransaksi(range.start, range.end),
-    fetchPesanan(range.start, range.end)
+    fetchPesanan(range.start, range.end),
+    fetchBebanTetap()
   ]);
+
+  // Render banner reminder beban tetap belum tercatat
+  await renderBebanBanner();
 
   // Hitung pemasukan + pengeluaran dari transaksi manual
   const sumByDay = {};      // tanggal => { pemasukan, pengeluaran }
@@ -1056,7 +1060,219 @@ async function loadPengaturan() {
   $('#komisiGrab').value    = p.komisi_grabfood;
   $('#komisiShopee').value  = p.komisi_shopeefood;
   $('#komisiWa').value      = p.komisi_wa;
+  await fetchBebanTetap();
+  renderBebanTetapTable();
 }
+
+/* ===== BEBAN TETAP (recurring monthly) ===== */
+let stateBebanTetap = [];
+
+async function fetchBebanTetap() {
+  const { data, error } = await supa.from('pengeluaran_tetap').select('*').order('tanggal_bayar').order('nama');
+  if (error) { console.error(error); return []; }
+  stateBebanTetap = data || [];
+  return stateBebanTetap;
+}
+
+// Check apakah suatu item beban sudah jatuh tempo bulan ini & belum tercatat
+function isBebanDue(item) {
+  if (!item.aktif) return false;
+  const now = new Date();
+  const cm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (item.last_recorded_month === cm) return false;
+  return now.getDate() >= item.tanggal_bayar;
+}
+function isBebanUpcoming(item) {
+  if (!item.aktif) return false;
+  const now = new Date();
+  const cm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (item.last_recorded_month === cm) return false;
+  return now.getDate() < item.tanggal_bayar;
+}
+function isBebanRecorded(item) {
+  const now = new Date();
+  const cm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return item.last_recorded_month === cm;
+}
+
+function renderBebanTetapTable() {
+  const tbody = $('#bebanTetapTable tbody');
+  if (!tbody) return;
+  if (stateBebanTetap.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Belum ada beban tetap. Klik "+ Tambah Beban".</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = stateBebanTetap.map(b => {
+    let statusBadge = '';
+    if (isBebanRecorded(b))  statusBadge = '<span class="badge-status recorded">✓ Bulan ini</span>';
+    else if (isBebanDue(b))  statusBadge = '<span class="badge-status due">! Belum dicatat</span>';
+    else if (isBebanUpcoming(b)) statusBadge = `<span class="badge-status upcoming">akan jatuh tempo</span>`;
+    return `
+    <tr class="beban-row ${b.aktif === false ? 'inactive' : ''}" data-id="${b.id}">
+      <td><input type="text" class="beban-nama" value="${escapeHtml(b.nama)}" placeholder="Sewa Warung" />${statusBadge}</td>
+      <td>
+        <select class="beban-kategori">
+          ${KATEGORI_PENGELUARAN.map(k => `<option ${k === b.kategori ? 'selected' : ''}>${k}</option>`).join('')}
+        </select>
+      </td>
+      <td class="nominal-col"><input type="text" inputmode="numeric" class="beban-nominal number-input" value="${fmtNumber(b.nominal)}" /></td>
+      <td class="tgl-col"><input type="number" min="1" max="31" class="beban-tgl" value="${b.tanggal_bayar}" /></td>
+      <td><input type="text" class="beban-catatan" value="${escapeHtml(b.catatan || '')}" placeholder="opsional" /></td>
+      <td style="text-align:center;"><input type="checkbox" class="toggle-aktif" ${b.aktif !== false ? 'checked' : ''} title="Aktifkan/nonaktifkan" /></td>
+      <td style="white-space:nowrap; text-align:right;">
+        ${isBebanDue(b) ? `<button class="btn btn-primary btn-sm" data-catat-id="${b.id}" style="font-size: 0.78rem; padding: 6px 10px;">Catat ${fmtNumber(b.nominal) ? 'Rp ' + fmtNumber(b.nominal) : ''}</button>` : ''}
+        <button class="row-delete" data-del-beban="${b.id}" title="Hapus">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  $$('.beban-row', tbody).forEach(row => {
+    const id = row.dataset.id;
+    $$('input, select', row).forEach(inp => {
+      inp.addEventListener('blur',  () => saveBebanRow(id, row));
+      inp.addEventListener('change', () => saveBebanRow(id, row));
+    });
+    row.querySelector('[data-del-beban]')?.addEventListener('click', () => deleteBebanTetap(id));
+    row.querySelector('[data-catat-id]')?.addEventListener('click', () => catatBebanTetap(parseInt(id)));
+  });
+}
+
+async function addBebanTetap() {
+  const { data, error } = await supa.from('pengeluaran_tetap').insert({
+    nama: 'Beban Baru',
+    kategori: 'Sewa',
+    nominal: 0,
+    tanggal_bayar: 1,
+    aktif: true
+  }).select().single();
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  stateBebanTetap.push(data);
+  renderBebanTetapTable();
+  toast('Beban tetap ditambah. Edit nama, kategori, nominal, tanggal.', 'success');
+}
+
+async function saveBebanRow(id, row) {
+  const payload = {
+    nama: $('.beban-nama', row).value.trim() || 'Tanpa Nama',
+    kategori: $('.beban-kategori', row).value,
+    nominal: parseNum($('.beban-nominal', row).value),
+    tanggal_bayar: Math.min(31, Math.max(1, parseInt($('.beban-tgl', row).value) || 1)),
+    catatan: $('.beban-catatan', row).value.trim() || null,
+    aktif: $('.toggle-aktif', row).checked
+  };
+  const { error } = await supa.from('pengeluaran_tetap').update(payload).eq('id', id);
+  if (error) { toast('Gagal update: ' + error.message, 'error'); return; }
+  const idx = stateBebanTetap.findIndex(b => b.id == id);
+  if (idx >= 0) stateBebanTetap[idx] = { ...stateBebanTetap[idx], ...payload };
+  row.classList.toggle('inactive', payload.aktif === false);
+}
+
+async function deleteBebanTetap(id) {
+  if (!confirm('Hapus beban tetap ini? Riwayat transaksi yang sudah dicatat tidak akan terhapus.')) return;
+  const { error } = await supa.from('pengeluaran_tetap').delete().eq('id', id);
+  if (error) { toast('Gagal: ' + error.message, 'error'); return; }
+  stateBebanTetap = stateBebanTetap.filter(b => b.id != id);
+  renderBebanTetapTable();
+  toast('Beban tetap dihapus.');
+}
+
+// Catat 1 beban → buat transaksi pengeluaran + update last_recorded_month
+async function catatBebanTetap(id) {
+  const item = stateBebanTetap.find(b => b.id == id);
+  if (!item) return;
+  const now = new Date();
+  const cm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  // Tanggal aktual: pakai tanggal_bayar di bulan ini
+  const day = Math.min(item.tanggal_bayar, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate());
+  const tanggal = `${cm}-${String(day).padStart(2, '0')}`;
+
+  if (!confirm(`Catat beban: ${item.nama}\nNominal: Rp ${fmtNumber(item.nominal)}\nTanggal: ${fmtDate(tanggal)}\n\nLanjutkan?`)) return;
+
+  const { error: txErr } = await supa.from('transaksi').insert({
+    tanggal,
+    tipe: 'pengeluaran',
+    kategori: item.kategori,
+    nominal: Number(item.nominal),
+    catatan: `[Beban Tetap] ${item.nama}${item.catatan ? ' — ' + item.catatan : ''}`,
+    dibuat_oleh: session.username
+  });
+  if (txErr) { toast('Gagal catat: ' + txErr.message, 'error'); return; }
+
+  // Update last_recorded_month
+  await supa.from('pengeluaran_tetap').update({ last_recorded_month: cm }).eq('id', id);
+  const idx = stateBebanTetap.findIndex(b => b.id == id);
+  if (idx >= 0) stateBebanTetap[idx].last_recorded_month = cm;
+
+  toast(`✓ ${item.nama} tercatat (Rp ${fmtNumber(item.nominal)})`, 'success');
+  renderBebanTetapTable();
+  renderBebanBanner();
+}
+
+// Catat semua yang due sekaligus
+async function catatSemuaBebanTetap() {
+  const dueItems = stateBebanTetap.filter(isBebanDue);
+  if (dueItems.length === 0) return;
+  const total = dueItems.reduce((s, it) => s + Number(it.nominal), 0);
+  if (!confirm(`Catat semua ${dueItems.length} beban tetap bulan ini?\nTotal: Rp ${fmtNumber(total)}\n\nLanjutkan?`)) return;
+
+  const now = new Date();
+  const cm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+  const txRows = dueItems.map(item => {
+    const day = Math.min(item.tanggal_bayar, lastDay);
+    return {
+      tanggal: `${cm}-${String(day).padStart(2, '0')}`,
+      tipe: 'pengeluaran',
+      kategori: item.kategori,
+      nominal: Number(item.nominal),
+      catatan: `[Beban Tetap] ${item.nama}${item.catatan ? ' — ' + item.catatan : ''}`,
+      dibuat_oleh: session.username
+    };
+  });
+
+  const { error: txErr } = await supa.from('transaksi').insert(txRows);
+  if (txErr) { toast('Gagal: ' + txErr.message, 'error'); return; }
+
+  // Update last_recorded_month untuk semua
+  const ids = dueItems.map(it => it.id);
+  await supa.from('pengeluaran_tetap').update({ last_recorded_month: cm }).in('id', ids);
+  dueItems.forEach(it => {
+    const idx = stateBebanTetap.findIndex(b => b.id === it.id);
+    if (idx >= 0) stateBebanTetap[idx].last_recorded_month = cm;
+  });
+
+  toast(`✓ ${dueItems.length} beban tetap tercatat (Rp ${fmtNumber(total)})`, 'success');
+  renderBebanBanner();
+  if (rekapTab === 'detail') renderRekapDetail();
+}
+
+// Banner di Dashboard
+async function renderBebanBanner() {
+  const banner = $('#bebanTetapBanner');
+  if (!banner) return;
+  if (stateBebanTetap.length === 0) await fetchBebanTetap();
+  const dueItems = stateBebanTetap.filter(isBebanDue);
+  if (dueItems.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+  const total = dueItems.reduce((s, it) => s + Number(it.nominal), 0);
+  const list = dueItems.map(it => `${it.nama} (Rp ${fmtNumber(it.nominal)})`).join(' · ');
+  banner.innerHTML = `
+    <div class="beban-banner-msg">
+      🔔 <strong>${dueItems.length} beban tetap</strong> belum dicatat bulan ini — total <strong>${fmtRp(total)}</strong>
+      <div class="beban-banner-list">${list}</div>
+    </div>
+    <div class="beban-banner-actions">
+      <a href="#/pengaturan" class="btn btn-ghost btn-sm">Lihat</a>
+      ${session.role === 'admin' ? '<button class="btn btn-primary btn-sm" id="catatSemuaBebanBtn">✓ Catat Semua</button>' : ''}
+    </div>`;
+  banner.style.display = 'flex';
+  $('#catatSemuaBebanBtn')?.addEventListener('click', catatSemuaBebanTetap);
+}
+
+/* ===== End BEBAN TETAP ===== */
 
 async function savePengaturan() {
   const target  = parseNum($('#settingTarget').value);
@@ -2348,6 +2564,7 @@ function bindEvents() {
 
   // Pengaturan
   $('#saveSettingsBtn').addEventListener('click', savePengaturan);
+  $('#addBebanTetapBtn')?.addEventListener('click', addBebanTetap);
 
   // HPP tabs
   $$('#hppTabs button').forEach(b => b.addEventListener('click', () => showHppTab(b.dataset.hppTab)));

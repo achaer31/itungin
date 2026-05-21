@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/css/styles.css?v=20260521keluar" />
+  <link rel="stylesheet" href="/assets/css/styles.css?v=20260521tetap" />
 
   <!-- Supabase JS SDK (UMD) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -94,6 +94,9 @@
             <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Refresh</button>
           </div>
         </div>
+
+        <!-- Banner reminder: beban tetap yang belum tercatat bulan ini -->
+        <div id="bebanTetapBanner" class="beban-banner" style="display: none;"></div>
 
         <div class="kpi-grid">
           <div class="kpi-card highlight">
@@ -329,6 +332,33 @@
           <button class="btn btn-primary" id="saveSettingsBtn">💾 Simpan Pengaturan</button>
         </div>
 
+        <!-- Beban Tetap (recurring monthly cost) -->
+        <div class="settings-card mt-16" style="max-width: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <h3 style="font-family: var(--font-display); font-size: 1.2rem; margin-bottom: 4px;">📌 Beban Tetap Bulanan</h3>
+              <p class="text-muted" style="font-size: 0.85rem; margin: 0;">Sewa, gaji, listrik, internet — setup sekali, sistem auto-ingetin tiap bulan.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="addBebanTetapBtn">+ Tambah Beban</button>
+          </div>
+          <div class="grid-wrap" style="max-height: none;">
+            <table class="bulk-grid" id="bebanTetapTable">
+              <thead>
+                <tr>
+                  <th style="text-align:left; padding-left: 16px;">Nama</th>
+                  <th>Kategori</th>
+                  <th>Nominal (Rp)</th>
+                  <th>Tgl Bayar</th>
+                  <th>Catatan</th>
+                  <th>Aktif</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="settings-card mt-16">
           <h3 style="font-family: var(--font-body); font-size: 0.82rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cream-dim); margin-bottom: 12px;">Tentang App</h3>
           <p class="text-muted" style="font-size: 0.9rem; line-height: 1.7;">
@@ -524,7 +554,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- Scripts: config harus di-load duluan, lalu app.js -->
-  <script src="/assets/js/config.js?v=20260521keluar"></script>
-  <script src="/assets/js/app.js?v=20260521keluar"></script>
+  <script src="/assets/js/config.js?v=20260521tetap"></script>
+  <script src="/assets/js/app.js?v=20260521tetap"></script>
 </body>
 </html>

@@ -549,6 +549,85 @@ body.unauthenticated #view-login { display: flex; }
   color: var(--cream);
 }
 
+/* Beban Tetap reminder banner di Dashboard */
+.beban-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: linear-gradient(90deg, rgba(245, 166, 35, 0.18), rgba(232, 115, 44, 0.12));
+  border: 1px solid rgba(245, 166, 35, 0.45);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.beban-banner .beban-banner-msg {
+  font-size: 0.95rem;
+  color: var(--cream);
+  flex: 1;
+  min-width: 240px;
+}
+.beban-banner .beban-banner-msg strong {
+  color: var(--amber);
+}
+.beban-banner .beban-banner-list {
+  font-size: 0.82rem;
+  color: var(--cream-dim);
+  margin-top: 4px;
+}
+.beban-banner-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Beban Tetap table row */
+.beban-row td { padding: 8px 12px; vertical-align: middle; }
+.beban-row input, .beban-row select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+.beban-row input:focus, .beban-row select:focus {
+  outline: none;
+  border-color: var(--ember);
+}
+.beban-row td.nominal-col input { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.beban-row td.tgl-col input {
+  text-align: center;
+  width: 60px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.beban-row .badge-status {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-left: 6px;
+}
+.beban-row .badge-status.recorded {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--green);
+}
+.beban-row .badge-status.due {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
+.beban-row .badge-status.upcoming {
+  background: rgba(244, 234, 215, 0.06);
+  color: var(--cream-dim);
+}
+.beban-row.inactive td { opacity: 0.45; }
+
 /* Detail Pengeluaran table */
 .detail-pengeluaran-card {
   background: var(--bg-2);
