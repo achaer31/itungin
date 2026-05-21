@@ -101,6 +101,43 @@ const parseNum = (v) => {
   return isNaN(n) ? 0 : n;
 };
 
+// Format integer dengan titik ribuan: 100000 → "100.000"
+const fmtNumber = (n) => {
+  const num = Number(n) || 0;
+  return num === 0 ? '' : num.toLocaleString('id-ID');
+};
+
+/* Auto-format input number sambil user ngetik.
+   Pasang class "number-input" + type="text" + inputmode="numeric" ke field-nya. */
+function formatNumberInputEl(input) {
+  const oldValue = input.value;
+  const cursor = input.selectionStart || 0;
+  const digitsBeforeCursor = oldValue.substring(0, cursor).replace(/\D/g, '').length;
+
+  const digits = oldValue.replace(/\D/g, '');
+  const formatted = digits ? Number(digits).toLocaleString('id-ID') : '';
+  if (formatted === oldValue) return;
+
+  input.value = formatted;
+
+  // Restore cursor di posisi digit yang sama
+  let newCursor = 0, digitsCount = 0;
+  for (let i = 0; i < formatted.length; i++) {
+    if (digitsCount === digitsBeforeCursor) break;
+    if (/\d/.test(formatted[i])) digitsCount++;
+    newCursor = i + 1;
+  }
+  if (newCursor === 0 && digitsBeforeCursor > 0) newCursor = formatted.length;
+  try { input.setSelectionRange(newCursor, newCursor); } catch {}
+}
+
+// Event delegation — semua .number-input di seluruh app otomatis ke-format
+document.addEventListener('input', (e) => {
+  if (e.target.matches && e.target.matches('.number-input')) {
+    formatNumberInputEl(e.target);
+  }
+});
+
 function toast(msg, type = '') {
   const el = $('#toast');
   if (!el) return;
@@ -528,7 +565,7 @@ function modeARow(tipe, kategori) {
   return `<div class="input-row">
     <label>${kategori}</label>
     <span class="rp-prefix">Rp</span>
-    <input type="number" inputmode="numeric" min="0" step="1000" class="mode-a-input" data-tipe="${tipe}" data-kategori="${kategori}" placeholder="0" />
+    <input type="text" inputmode="numeric" class="mode-a-input number-input" data-tipe="${tipe}" data-kategori="${kategori}" placeholder="0" autocomplete="off" />
   </div>`;
 }
 function recalcModeATotal() {
@@ -635,8 +672,8 @@ function addBulkRow(date = '') {
   tr.className = 'row-new';
   tr.innerHTML = `
     <td class="col-tanggal"><input type="date" value="${date}" /></td>
-    ${KATEGORI_PEMASUKAN.map(k => `<td><input type="number" class="cell" inputmode="numeric" data-tipe="pemasukan" data-kategori="${k}" placeholder="0" /></td>`).join('')}
-    ${KATEGORI_PENGELUARAN.map(k => `<td><input type="number" class="cell" inputmode="numeric" data-tipe="pengeluaran" data-kategori="${k}" placeholder="0" /></td>`).join('')}
+    ${KATEGORI_PEMASUKAN.map(k => `<td><input type="text" class="cell number-input" inputmode="numeric" data-tipe="pemasukan" data-kategori="${k}" placeholder="0" autocomplete="off" /></td>`).join('')}
+    ${KATEGORI_PENGELUARAN.map(k => `<td><input type="text" class="cell number-input" inputmode="numeric" data-tipe="pengeluaran" data-kategori="${k}" placeholder="0" autocomplete="off" /></td>`).join('')}
     <td class="col-action"><button class="row-delete" title="Hapus baris">🗑</button></td>`;
   tbody.appendChild(tr);
   tr.querySelector('.row-delete').addEventListener('click', () => {
@@ -679,7 +716,8 @@ function handleBulkPaste(e) {
       if (inp.type === 'date') {
         inp.value = val.trim();
       } else {
-        inp.value = parseNum(val) || '';
+        const n = parseNum(val);
+        inp.value = n > 0 ? fmtNumber(n) : '';
       }
     });
   });
@@ -814,7 +852,7 @@ function exportCsv() {
 /* ============ 10. PENGATURAN ============ */
 async function loadPengaturan() {
   const p = await fetchPengaturan();
-  $('#settingTarget').value = p.target_bulanan;
+  $('#settingTarget').value = fmtNumber(p.target_bulanan);
   $('#komisiGofood').value  = p.komisi_gofood;
   $('#komisiGrab').value    = p.komisi_grabfood;
   $('#komisiShopee').value  = p.komisi_shopeefood;
@@ -928,7 +966,7 @@ function renderBahanTable() {
     <tr class="bahan-row" data-id="${b.id}">
       <td><input type="text" class="bahan-nama" value="${b.nama}" placeholder="Nama bahan" /></td>
       <td><select class="bahan-satuan">${SATUAN_OPTIONS.map(s => `<option ${s === b.satuan ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
-      <td class="harga"><input type="number" class="bahan-harga" inputmode="numeric" min="0" value="${b.harga_per_satuan}" /></td>
+      <td class="harga"><input type="text" class="bahan-harga number-input" inputmode="numeric" value="${fmtNumber(b.harga_per_satuan)}" autocomplete="off" /></td>
       <td><input type="text" class="bahan-catatan" value="${b.catatan || ''}" placeholder="opsional" /></td>
       <td><button class="row-delete" data-del-bahan="${b.id}" title="Hapus">🗑</button></td>
     </tr>
@@ -1002,7 +1040,7 @@ function renderResepEditor(menuId) {
           <div class="text-muted" style="font-size: 0.82rem; margin-top: 2px;">${menu.kategori}</div>
         </div>
         <div class="harga">
-          <input type="number" id="resepHargaJual" value="${menu.harga_jual}" style="width: 130px; padding: 8px 12px; text-align: right; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; font-variant-numeric: tabular-nums; font-weight: 600;" />
+          <input type="text" id="resepHargaJual" class="number-input" inputmode="numeric" value="${fmtNumber(menu.harga_jual)}" autocomplete="off" style="width: 130px; padding: 8px 12px; text-align: right; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 8px; font-variant-numeric: tabular-nums; font-weight: 600;" />
           <div class="text-muted" style="font-size: 0.7rem; text-align: right; margin-top: 4px;">Harga Jual</div>
         </div>
       </div>
